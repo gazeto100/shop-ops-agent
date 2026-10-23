@@ -1,0 +1,56 @@
+[project]
+name = "shop-ops-agent"
+version = "0.1.0"
+description = "AI operations agent for a small e-commerce store (RAG + tools + evals)"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pydantic>=2.8",
+  "pydantic-settings>=2.4",
+  "httpx>=0.27",
+  "chromadb>=0.5",
+  "sentence-transformers>=3.0",
+  "rank-bm25>=0.2",
+  "openai>=1.50",
+  "anthropic>=0.40",
+  "langfuse>=2.50",
+  "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "pre-commit>=3.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/shop_ops_agent"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "SIM", "RUF"]
+# RUF001-003: Bulgarian strings are expected; do not flag Cyrillic as "ambiguous"
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.mypy]
+strict = true
+files = ["src"]
+ignore_missing_imports = true
+# FastAPI decorators are typed only with the plugin-less fallback; allow them
+disable_error_code = ["untyped-decorator"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+asyncio_mode = "auto"

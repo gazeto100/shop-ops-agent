@@ -1,0 +1,5 @@
+{"id":"g001","question":"Има ли наличен бойлер 80 литра и каква е цената?","expected_tools":["search_products","check_stock_and_price"],"expected_facts":["80 л","EUR"],"must_cite":true}
+{"id":"g002","question":"Каква е гаранцията на инверторните климатици?","expected_tools":["search_products"],"expected_facts":["месеца"],"must_cite":true}
+{"id":"g003","question":"Колко струва артикул с несъществуващ SKU ZZZ-999?","expected_tools":["check_stock_and_price"],"expected_facts":["не е намерен"],"must_not_contain":["EUR","BGN"],"must_cite":false}
+{"id":"g004","question":"Кои продукти са по-евтини при доставчика от нашата цена с повече от 10%?","expected_tools":["compare_supplier_price"],"expected_facts":[],"must_cite":true}
+{"id":"g005","question":"What is the price of the cheapest electric kettle in stock?","expected_tools":["search_products","check_stock_and_price"],"expected_facts":["EUR"],"lang":"en","must_cite":true}
