@@ -3,10 +3,11 @@
 from fastapi import FastAPI
 
 from shop_ops_agent import __version__
+from shop_ops_agent.api.schemas import HealthResponse
 
 app = FastAPI(title="shop-ops-agent", version=__version__)
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "version": __version__}
+async def health() -> HealthResponse:
+    return HealthResponse(status="ok", version=__version__)

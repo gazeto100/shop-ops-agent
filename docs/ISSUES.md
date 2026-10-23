@@ -12,7 +12,7 @@ Each issue below is written as the body to paste into GitHub (or run `scripts/cr
 **Acceptance criteria**
 - [ ] `uv sync --all-extras` works on a clean clone; `uv.lock` committed
 - [ ] `ruff`, `mypy --strict`, `pytest` all pass
-- [ ] `/health` endpoint returns `{"status":"ok"}` and has a test
+- [ ] `/health` endpoint returns `{"status":"ok","version":"<semver>"}` and has a test
 - [ ] `FakeLLM` fixture exists and is used by at least one test
 - [ ] CI badge in README is green
 
