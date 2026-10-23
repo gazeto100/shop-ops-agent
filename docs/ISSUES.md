@@ -18,7 +18,7 @@ Each issue below is written as the body to paste into GitHub (or run `scripts/cr
 
 ## #2 Dockerfile + image build in CI — M1
 **Acceptance criteria**
-- [ ] `docker build` < 2 min, image < 1.5 GB (document actual size in PR)
+- [ ] `docker build` < 2 min, image < 1.5 GB compressed (document actual size in PR)
 - [ ] `docker run -p 8000:8000 shop-ops-agent` serves `/health`
 - [ ] CI `docker` job passes
 

@@ -1,0 +1,11 @@
+.git
+.venv
+.env
+**/__pycache__
+.mypy_cache
+.pytest_cache
+.ruff_cache
+data/chroma
+data/feeds
+data/*.csv
+!data/products.sample.csv
