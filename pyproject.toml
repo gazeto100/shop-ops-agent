@@ -46,10 +46,7 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.mypy]
 strict = true
-files = ["src"]
-ignore_missing_imports = true
-# FastAPI decorators are typed only with the plugin-less fallback; allow them
-disable_error_code = ["untyped-decorator"]
+files = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit"]

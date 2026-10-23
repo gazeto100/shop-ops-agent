@@ -13,7 +13,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: uv sync --all-extras
+      # --locked: fail if uv.lock is missing or out of date with pyproject.toml
+      - run: uv sync --all-extras --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy
@@ -21,7 +22,9 @@ jobs:
 
   evals:
     # Runs real-LLM evals only on main (needs secret). Gate: fails if score < threshold.
-    if: github.ref == 'refs/heads/main'
+    # Off until the eval runner (#8) exists: set repo variable LIVE_EVALS_ENABLED=true
+    # and secret OPENAI_API_KEY to turn it on.
+    if: github.ref == 'refs/heads/main' && vars.LIVE_EVALS_ENABLED == 'true'
     needs: lint-test
     runs-on: ubuntu-latest
     env:
@@ -31,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-      - run: uv sync --all-extras
+      - run: uv sync --all-extras --locked
       - run: uv run pytest tests/evals -q
 
   docker:

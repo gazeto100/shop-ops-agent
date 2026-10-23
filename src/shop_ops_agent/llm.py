@@ -5,12 +5,14 @@ Issue #5 implements OpenAI/Anthropic/Ollama adapters behind the same Protocol.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
+
+type Role = Literal["system", "user", "assistant", "tool"]
 
 
 @dataclass(frozen=True)
 class Message:
-    role: str  # "system" | "user" | "assistant" | "tool"
+    role: Role
     content: str
     tool_call_id: str | None = None
 
@@ -25,7 +27,7 @@ class ToolCall:
 @dataclass(frozen=True)
 class LLMResponse:
     content: str
-    tool_calls: list[ToolCall] = field(default_factory=list)
+    tool_calls: tuple[ToolCall, ...] = ()
     usage: dict[str, int] = field(default_factory=dict)
 
 
