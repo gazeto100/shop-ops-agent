@@ -11,6 +11,8 @@ dependencies = [
   "httpx>=0.27",
   "chromadb>=0.5",
   "sentence-transformers>=3.0",
+  # Direct dep only so [tool.uv.sources] can route it to the CPU-only build (see below)
+  "torch>=2.14",
   "rank-bm25>=0.2",
   "openai>=1.50",
   "anthropic>=0.40",
@@ -26,6 +28,16 @@ dev = [
   "mypy>=1.11",
   "pre-commit>=3.8",
 ]
+
+# Linux PyPI torch bundles CUDA (~3 GB of wheels). Embeddings run on CPU, so use the
+# CPU-only build there; Windows/macOS PyPI wheels are already CPU-only.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 [build-system]
 requires = ["hatchling"]

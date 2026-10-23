@@ -42,3 +42,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: docker build -t shop-ops-agent .
+      - name: Image size < 1.5 GB (compressed)
+        # `docker image inspect .Size` is compressed on the containerd store but unpacked on
+        # the classic one, so measure explicitly. gzip -1 compresses less than a registry
+        # does, so this errs on the large side.
+        run: |
+          size=$(docker save shop-ops-agent | gzip -1 | wc -c)
+          unpacked=$(docker run --rm --entrypoint du shop-ops-agent -sxb / | cut -f1)
+          echo "Compressed: $((size / 1000 / 1000)) MB, unpacked: $((unpacked / 1000 / 1000)) MB"
+          test "$size" -lt 1500000000
+      - name: Smoke test /health
+        run: |
+          docker run -d --name app -p 8000:8000 shop-ops-agent
+          for _ in $(seq 30); do
+            curl -fsS localhost:8000/health && exit 0
+            sleep 1
+          done
+          docker logs app
+          exit 1
