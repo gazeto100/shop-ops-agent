@@ -1,5 +1,7 @@
 # shop-ops-agent
 
+[![CI](https://github.com/gazeto100/shop-ops-agent/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gazeto100/shop-ops-agent/actions/workflows/ci.yml)
+
 AI operations agent for a small e-commerce store: RAG over the product catalog,
 tool-calling for stock/price/supplier lookups, FastAPI service, eval suite, tracing, CI.
 
