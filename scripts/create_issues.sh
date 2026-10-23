@@ -29,7 +29,11 @@ for f in $(ls /tmp/_issue_*.txt | sort -V); do
   ms=$(head -1 "$f" | cut -f2)
   body=$(tail -n +2 "$f")
   case "$ms" in
-    M1*) label=foundation;; M2*) label=rag;; M3*) label=agent;; M4*) label=evals;; *) label=ship;;
+    M1*) label=foundation; ms="M1 Foundation";;
+    M2*) label=rag;        ms="M2 RAG";;
+    M3*) label=agent;      ms="M3 Agent";;
+    M4*) label=evals;      ms="M4 Evals";;
+    *)   label=ship;       ms="M5 Ship";;
   esac
   echo "Creating: $title [$ms]"
   gh issue create --title "$title" --body "$body" --milestone "$ms" --label "$label" >/dev/null
