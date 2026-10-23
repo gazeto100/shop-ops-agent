@@ -8,11 +8,10 @@ jobs:
   lint-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - uses: actions/checkout@v7
+      # setup-uv publishes no floating major tag; pin the exact release.
+      # No setup-python: uv reads .python-version and installs that interpreter.
+      - uses: astral-sh/setup-uv@v10.3.2
       # --locked: fail if uv.lock is missing or out of date with pyproject.toml
       - run: uv sync --all-extras --locked
       - run: uv run ruff check .
@@ -21,9 +20,9 @@ jobs:
       - run: uv run pytest tests/unit -q
 
   evals:
-    # Runs real-LLM evals only on main (needs secret). Gate: fails if score < threshold.
-    # Off until the eval runner (#8) exists: set repo variable LIVE_EVALS_ENABLED=true
-    # and secret OPENAI_API_KEY to turn it on.
+    # Real-LLM evals, main only. Disabled until the eval runner (#8) exists: set repo
+    # variable LIVE_EVALS_ENABLED=true and secret OPENAI_API_KEY to turn it on.
+    # The score threshold that fails the build arrives with #9.
     if: github.ref == 'refs/heads/main' && vars.LIVE_EVALS_ENABLED == 'true'
     needs: lint-test
     runs-on: ubuntu-latest
@@ -32,8 +31,8 @@ jobs:
       LLM_PROVIDER: openai
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
       - run: uv sync --all-extras --locked
       - run: uv run pytest tests/evals -q
 
@@ -41,5 +40,5 @@ jobs:
     needs: lint-test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: docker build -t shop-ops-agent .
