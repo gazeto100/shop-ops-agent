@@ -1,4 +1,4 @@
-# shop-ops-agent — Claude Code project instructions
+# shop-ops-agent - Claude Code project instructions
 
 ## What this project is
 An AI operations agent for a small e-commerce store (electro.marketpage.bg).
@@ -24,16 +24,20 @@ managers, `async`), but do not over-comment ordinary code.
 - **Small, reviewable commits.** One issue → one branch → one PR. Reference the
   issue number in the commit message (`feat(rag): hybrid retrieval (#4)`).
 
-## Stack (fixed — do not swap without asking)
+## Stack (fixed - do not swap without asking)
 - Python 3.12, `uv` for env/deps, `ruff` (lint+format), `mypy`, `pytest`
 - FastAPI + Uvicorn, Pydantic v2 for all request/response/tool schemas
 - LLM: provider-agnostic via `src/shop_ops_agent/llm.py`
   (`openai`, `anthropic`, or `ollama` selected by `LLM_PROVIDER` env var)
 - Embeddings: `sentence-transformers` (local, `intfloat/multilingual-e5-small`)
-  — Bulgarian + English product text, no API cost for indexing
+  - Bulgarian + English product text, no API cost for indexing
 - Vector store: ChromaDB (persistent, `./data/chroma`)
 - Tracing: Langfuse (optional, enabled when `LANGFUSE_*` keys exist)
 - Container: single `Dockerfile`, CI via GitHub Actions
+- Installed SDK versions are newer than any model's training data (`openai` 3.x, `anthropic` 2.x,
+  `chromadb` 1.5, `sentence-transformers` 6.x). Before writing code against them, read the
+  installed package's docstrings or `uv run python -c "import X; help(X.Client)"` - do not
+  write API calls from memory.
 
 Do NOT introduce LangChain/LlamaIndex. The point of this project is to show
 understanding of the primitives (retrieval, tool loop, evals), not framework use.
@@ -71,7 +75,7 @@ Run `make lint test` before every commit. CI runs the same.
 
 ## Working agreements for Claude Code
 1. Before starting an issue, read it (`gh issue view N`) and restate the
-   acceptance criteria in your plan. If criteria are ambiguous, ask — do not guess.
+   acceptance criteria in your plan. If criteria are ambiguous, ask - do not guess.
 2. Prefer the smallest change that satisfies the acceptance criteria. Do not
    add features, abstractions, or "while I'm here" refactors.
 3. When you add a dependency, justify it in one line in `docs/DECISIONS.md`.
