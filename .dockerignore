@@ -7,3 +7,5 @@
 .ruff_cache
 data/chroma
 data/feeds
+data/*.csv
+!data/products.sample.csv

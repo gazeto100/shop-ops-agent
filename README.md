@@ -33,6 +33,13 @@ curl -X POST localhost:8000/chat -H 'content-type: application/json' \
   -d '{"session_id":"demo","message":"Има ли наличен бойлер 80 литра и каква е цената?"}'
 ```
 
+### Docker
+```bash
+make docker                                   # CPU-only image, ~0.6 GB compressed
+docker run --rm -p 8000:8000 shop-ops-agent
+curl localhost:8000/health                    # {"status":"ok","version":"0.1.0"}
+```
+
 ## Evals
 ```bash
 RUN_LIVE_EVALS=1 make evals
