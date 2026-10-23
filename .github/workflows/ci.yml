@@ -50,7 +50,7 @@ jobs:
         shell: bash
         run: |
           size=$(docker save shop-ops-agent | gzip -1 | wc -c)
-          unpacked=$(docker run --rm --entrypoint du shop-ops-agent -sxb / | cut -f1)
+          unpacked=$(docker run --rm --user 0 --entrypoint du shop-ops-agent -sxb / | cut -f1)
           echo "Compressed: $((size / 1000 / 1000)) MB, unpacked: $((unpacked / 1000 / 1000)) MB"
           test "$size" -gt 1000000
           test "$size" -lt 1500000000
