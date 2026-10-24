@@ -9,8 +9,9 @@ dependencies = [
   "pydantic>=2.8",
   "pydantic-settings>=2.4",
   "httpx>=0.27",
-  "chromadb>=0.5",
-  "sentence-transformers>=3.0",
+  "chromadb>=1.5",
+  "sentence-transformers>=6.0",
+  "numpy>=2.5",
   # Direct dep only so [tool.uv.sources] can route it to the CPU-only build (see below)
   "torch>=2.14",
   "rank-bm25>=0.2",
