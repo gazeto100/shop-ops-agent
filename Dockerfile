@@ -15,7 +15,9 @@ COPY data/products.sample.csv ./data/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 # Unprivileged runtime user; the home dir is for caches (e.g. Hugging Face models, #3).
-RUN useradd --create-home --uid 10001 app
+# /app stays root-owned and read-only; only the index dir (CHROMA_PATH) is writable.
+RUN useradd --create-home --uid 10001 app \
+    && install -d -o app -g app /app/data/chroma
 USER app
 # Run the venv directly: `uv run` would re-sync the project on every container start.
 ENV PATH="/app/.venv/bin:$PATH"

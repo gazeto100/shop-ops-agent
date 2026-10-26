@@ -108,3 +108,12 @@ def test_misaligned_row_is_rejected(tmp_path: Path, row: str, expected: str) -> 
 
 def test_empty_feed_is_rejected(tmp_path: Path) -> None:
     assert error_lines(write_feed(tmp_path)) == ["line 1: feed contains no products"]
+
+
+def test_windows_1251_feed_is_rejected_as_not_utf8(tmp_path: Path) -> None:
+    path = tmp_path / "feed.csv"
+    path.write_bytes(f"{HEADER}\n{GOOD}\n".encode("cp1251"))
+
+    [error] = error_lines(path)
+
+    assert error.startswith("file: not UTF-8 (invalid byte at offset ")

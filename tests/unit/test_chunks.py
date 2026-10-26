@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from shop_ops_agent.ingest.chunks import chunk_metadata, chunk_text
 from shop_ops_agent.ingest.products import Product, load_products
 
@@ -17,6 +19,16 @@ def test_chunk_is_name_category_description_warranty() -> None:
         "Емайлиран водосъдържател, 2 kW, термостат, вертикален монтаж\n"
         "Гаранция: 60 месеца"
     )
+
+
+@pytest.mark.parametrize(
+    ("months", "expected"),
+    [(0, "Без гаранция"), (1, "Гаранция: 1 месец"), (24, "Гаранция: 24 месеца")],
+)
+def test_warranty_line_is_correct_bulgarian(months: int, expected: str) -> None:
+    product = boiler().model_copy(update={"warranty_months": months})
+
+    assert chunk_text(product).splitlines()[-1] == expected
 
 
 def test_volatile_fields_stay_out_of_the_index() -> None:

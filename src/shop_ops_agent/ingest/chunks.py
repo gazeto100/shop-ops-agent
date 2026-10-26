@@ -12,8 +12,19 @@ def chunk_text(product: Product) -> str:
         f"{product.name}\n"
         f"Категория: {product.category}\n"
         f"{product.description}\n"
-        f"Гаранция: {product.warranty_months} месеца"
+        f"{warranty_text(product.warranty_months)}"
     )
+
+
+def warranty_text(months: int) -> str:
+    # The model may quote this to customers, so it must be correct Bulgarian.
+    match months:
+        case 0:
+            return "Без гаранция"
+        case 1:
+            return "Гаранция: 1 месец"
+        case _:
+            return f"Гаранция: {months} месеца"
 
 
 def chunk_metadata(product: Product) -> dict[str, str]:
