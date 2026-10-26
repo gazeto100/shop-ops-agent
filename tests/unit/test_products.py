@@ -37,6 +37,27 @@ def test_sample_feed_loads_every_row_typed() -> None:
     assert boiler.warranty_months == 60
 
 
+def test_sample_feed_has_english_names() -> None:
+    assert {p.sku: p.name_en for p in load_products(SAMPLE)}["KET-17-S"] == (
+        "Electric kettle 1.7 l stainless steel"
+    )
+
+
+def test_name_en_column_is_optional(tmp_path: Path) -> None:
+    [product] = load_products(write_feed(tmp_path, GOOD))  # HEADER has no name_en
+
+    assert product.name_en == ""
+
+
+def test_empty_name_en_is_allowed(tmp_path: Path) -> None:
+    header = HEADER.replace("name,", "name,name_en,")
+    row = GOOD.replace("Кана,", "Кана,,")
+
+    [product] = load_products(write_feed(tmp_path, row, header=header))
+
+    assert product.name_en == ""
+
+
 def test_utf8_bom_and_surrounding_whitespace_are_tolerated(tmp_path: Path) -> None:
     path = tmp_path / "feed.csv"
     path.write_text(

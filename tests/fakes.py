@@ -34,11 +34,16 @@ class FakeEmbedder:
 
     def __init__(self) -> None:
         self.calls: list[list[str]] = []
+        self.queries: list[str] = []
 
     def embed_documents(self, texts: Sequence[str]) -> NDArray[np.float32]:
         self.calls.append(list(texts))
         rows = [self.vector(t) for t in texts]
         return np.asarray(rows, dtype=np.float32).reshape(len(rows), self.DIM)
+
+    def embed_query(self, text: str) -> NDArray[np.float32]:
+        self.queries.append(text)
+        return self.vector(text)
 
     @classmethod
     def vector(cls, text: str) -> NDArray[np.float32]:

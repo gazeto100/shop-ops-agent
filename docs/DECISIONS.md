@@ -28,3 +28,12 @@ reported). Then it upserts by sku and deletes skus missing from the feed, so ret
 never suggests discontinued products. An empty feed is rejected, since syncing it would
 wipe the index. Price and stock are kept out of embedded text *and* metadata: they change
 daily and tools read them live (#6).
+
+## 2026-10-26 — Hybrid retrieval: RRF over Chroma cosine + BM25; English names in the data
+Reciprocal-rank fusion (k=60) merges the two rankings without normalising their
+incomparable scores. BM25 (`rank-bm25`, already a dependency; untyped, so one mypy
+override) is built from the chunks stored in Chroma, so both rank the same corpus. English
+queries against Bulgarian-only chunks missed (#4 comment): we fix that on the data side
+with an optional `name_en` feed column appended to the chunk, not by translating queries
+(no extra model call, no translation errors). Ranking quality is tested with the real
+model in `tests/integration/` (CI caches the model); unit tests use fakes.

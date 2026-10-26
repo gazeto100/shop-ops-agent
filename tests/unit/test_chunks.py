@@ -12,8 +12,18 @@ def boiler() -> Product:
     return next(p for p in load_products(SAMPLE) if p.sku == "BOIL-80-A")
 
 
-def test_chunk_is_name_category_description_warranty() -> None:
+def test_chunk_is_name_category_description_warranty_english_name() -> None:
     assert chunk_text(boiler()) == (
+        "Бойлер Tesy 80 л вертикален\n"
+        "Категория: Бойлери\n"
+        "Емайлиран водосъдържател, 2 kW, термостат, вертикален монтаж\n"
+        "Гаранция: 60 месеца\n"
+        "Tesy 80 l vertical electric water heater (boiler)"
+    )
+
+
+def test_without_english_name_the_chunk_is_unchanged_from_issue_3() -> None:
+    assert chunk_text(boiler().model_copy(update={"name_en": ""})) == (
         "Бойлер Tesy 80 л вертикален\n"
         "Категория: Бойлери\n"
         "Емайлиран водосъдържател, 2 kW, термостат, вертикален монтаж\n"
@@ -26,7 +36,7 @@ def test_chunk_is_name_category_description_warranty() -> None:
     [(0, "Без гаранция"), (1, "Гаранция: 1 месец"), (24, "Гаранция: 24 месеца")],
 )
 def test_warranty_line_is_correct_bulgarian(months: int, expected: str) -> None:
-    product = boiler().model_copy(update={"warranty_months": months})
+    product = boiler().model_copy(update={"warranty_months": months, "name_en": ""})
 
     assert chunk_text(product).splitlines()[-1] == expected
 

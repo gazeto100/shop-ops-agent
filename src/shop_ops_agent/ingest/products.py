@@ -17,6 +17,8 @@ class Product(BaseModel):
 
     sku: str = Field(min_length=1)
     name: str = Field(min_length=1)
+    # Optional column: lets English queries match Bulgarian-named products (#4).
+    name_en: str = ""
     category: str = Field(min_length=1)
     price_eur: Decimal = Field(gt=0, decimal_places=2)
     price_bgn: Decimal = Field(gt=0, decimal_places=2)
@@ -27,7 +29,7 @@ class Product(BaseModel):
     warranty_months: int = Field(ge=0)
 
 
-REQUIRED_COLUMNS = frozenset(Product.model_fields)
+REQUIRED_COLUMNS = frozenset(n for n, f in Product.model_fields.items() if f.is_required())
 
 
 @dataclass(frozen=True)

@@ -20,6 +20,10 @@ class StubModel:
         self.kwargs = kwargs
         return np.ones((len(texts), 4), dtype=np.float64)  # float64 on purpose
 
+    def encode_query(self, texts: Sequence[str], **kwargs: Any) -> Any:
+        self.kwargs = kwargs
+        return np.ones((len(texts), 4), dtype=np.float64)
+
 
 @pytest.fixture
 def embedder(monkeypatch: pytest.MonkeyPatch) -> SentenceTransformerEmbedder:
@@ -52,6 +56,18 @@ def test_returns_float32_matrix_one_row_per_text(embedder: SentenceTransformerEm
 
     assert vectors.dtype == np.float32
     assert vectors.shape == (3, 4)
+
+
+def test_queries_get_e5_query_prefix_and_are_normalised(
+    embedder: SentenceTransformerEmbedder,
+) -> None:
+    vector = embedder.embed_query("kettle")
+
+    kwargs = model_of(embedder).kwargs
+    assert kwargs["prompt"] == "query: "
+    assert kwargs["normalize_embeddings"] is True
+    assert vector.dtype == np.float32
+    assert vector.shape == (4,)
 
 
 def test_loads_the_configured_model(embedder: SentenceTransformerEmbedder) -> None:

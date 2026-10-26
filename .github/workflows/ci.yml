@@ -18,6 +18,13 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy
       - run: uv run pytest tests/unit -q
+      # Integration tests use the real embedding model (~470 MB); cache the download.
+      # The model name lives in config.py, so changing it busts the cache.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ hashFiles('src/shop_ops_agent/config.py') }}
+      - run: uv run pytest tests/integration -q
 
   evals:
     # Real-LLM evals, main only. Disabled until the eval runner (#8) exists: set repo

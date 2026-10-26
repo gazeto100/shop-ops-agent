@@ -1,4 +1,4 @@
-.PHONY: setup lint test evals ingest serve docker
+.PHONY: setup lint test test-integration evals ingest serve docker
 
 setup:
 	uv sync --all-extras
@@ -11,6 +11,9 @@ lint:
 
 test:
 	uv run pytest tests/unit -q
+
+test-integration:
+	uv run pytest tests/integration -q
 
 evals:
 	uv run pytest tests/evals -q
