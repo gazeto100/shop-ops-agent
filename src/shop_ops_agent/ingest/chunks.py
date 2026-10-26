@@ -8,12 +8,14 @@ from shop_ops_agent.ingest.products import Product
 
 
 def chunk_text(product: Product) -> str:
-    return (
+    text = (
         f"{product.name}\n"
         f"Категория: {product.category}\n"
         f"{product.description}\n"
         f"{warranty_text(product.warranty_months)}"
     )
+    # English name last, so a product without one is chunked exactly as before.
+    return f"{text}\n{product.name_en}" if product.name_en else text
 
 
 def warranty_text(months: int) -> str:

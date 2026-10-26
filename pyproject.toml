@@ -14,7 +14,7 @@ dependencies = [
   "numpy>=2.5",
   # Direct dep only so [tool.uv.sources] can route it to the CPU-only build (see below)
   "torch>=2.14",
-  "rank-bm25>=0.2",
+  "rank-bm25>=0.2.2",
   "openai>=1.50",
   "anthropic>=0.40",
   "langfuse>=2.50",
@@ -60,6 +60,11 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 [tool.mypy]
 strict = true
 files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+# rank-bm25 ships no type hints; retriever.py wraps its scores in a typed numpy array.
+module = ["rank_bm25"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit"]

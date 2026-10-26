@@ -54,6 +54,7 @@ src/shop_ops_agent/
   evals/           # eval runner, judges, metrics
 tests/
   unit/            # fast, no network
+  integration/     # real embedding model, no LLM (retrieval quality)
   evals/           # golden set (JSONL) + eval tests
 data/
   products.sample.csv   # committed sample; real feed is gitignored
@@ -66,6 +67,7 @@ docs/
 make setup      # uv sync + pre-commit install
 make lint       # ruff check + ruff format --check + mypy
 make test       # pytest tests/unit
+make test-integration  # pytest tests/integration (downloads the embedding model once)
 make evals      # pytest tests/evals (needs RUN_LIVE_EVALS=1 + provider key)
 make ingest     # python -m shop_ops_agent.ingest data/products.sample.csv
 make serve      # uvicorn shop_ops_agent.api.app:app --reload
