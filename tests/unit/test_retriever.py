@@ -80,6 +80,50 @@ def test_k_caps_results_and_never_exceeds_the_catalog(retriever: Retriever) -> N
     assert retriever.search("бойлер", k=0) == []
 
 
+@pytest.mark.parametrize("query", ["", "   ", "\n"])
+def test_blank_query_returns_no_hits(retriever: Retriever, query: str) -> None:
+    assert retriever.search(query) == []
+
+
+def test_k_deeper_than_the_candidate_depth_is_honoured(
+    tmp_path: Path, embedder: FakeEmbedder
+) -> None:
+    products = load_products(SAMPLE)
+    many = [p.model_copy(update={"sku": f"{p.sku}-{i}"}) for i in range(6) for p in products]
+    collection = open_collection(tmp_path / "chroma", MODEL)
+    sync_products(collection, many, embedder)
+
+    assert len(Retriever(collection, embedder).search("кана", k=40)) == 40
+
+
+def test_product_added_by_reingest_is_returned_not_a_crash(
+    tmp_path: Path, embedder: FakeEmbedder
+) -> None:
+    products = load_products(SAMPLE)
+    collection = open_collection(tmp_path / "chroma", MODEL)
+    sync_products(collection, products[:6], embedder)
+    retriever = Retriever(collection, embedder)
+    sync_products(collection, products, embedder)  # adds HEAT-2K-C
+
+    # The query equals the new chunk, so the fake vectors put it first in vector search.
+    hits = retriever.search(chunk_text(products[6]), k=7)
+
+    assert "HEAT-2K-C" in {h.sku for h in hits}
+
+
+def test_product_removed_by_reingest_is_never_returned(
+    tmp_path: Path, embedder: FakeEmbedder
+) -> None:
+    products = load_products(SAMPLE)
+    collection = open_collection(tmp_path / "chroma", MODEL)
+    sync_products(collection, products, embedder)
+    retriever = Retriever(collection, embedder)
+    sync_products(collection, products[:6], embedder)  # removes HEAT-2K-C
+
+    # "Конвектор" only matches HEAT-2K-C, which BM25's snapshot still contains.
+    assert "HEAT-2K-C" not in {h.sku for h in retriever.search("Конвектор", k=7)}
+
+
 def test_empty_index_returns_no_hits(tmp_path: Path, embedder: FakeEmbedder) -> None:
     retriever = Retriever(open_collection(tmp_path / "chroma", MODEL), embedder)
 

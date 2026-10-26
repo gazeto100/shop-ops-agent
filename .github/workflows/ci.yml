@@ -24,6 +24,8 @@ jobs:
         with:
           path: ~/.cache/huggingface
           key: hf-${{ hashFiles('src/shop_ops_agent/config.py') }}
+          # Any config.py edit misses the exact key; still start from the newest cached model.
+          restore-keys: hf-
       - run: uv run pytest tests/integration -q
 
   evals:

@@ -19,7 +19,7 @@ from shop_ops_agent.embeddings import Embedder
 # 60 is the constant from the original RRF paper (Cormack et al., 2009): large enough
 # that one list's top hit can't drown out agreement between lists.
 RRF_K = 60
-# How deep each list is read before fusing; more than any k we ask for.
+# Minimum depth each list is read before fusing (deeper when k is larger).
 CANDIDATES = 20
 
 
@@ -52,43 +52,65 @@ def reciprocal_rank_fusion(
 
 
 class Retriever:
-    """Searches the product index. Reads all chunks once at construction, so build a new
-    Retriever after re-ingesting."""
+    """Searches the product index.
+
+    BM25 statistics are built once from the chunks present at construction; vector search
+    and the returned hits always come from the live index. So after a re-ingest, removed
+    products never come back and new ones are found by vector search, but BM25 only
+    knows them once a new Retriever is built.
+    """
 
     def __init__(self, collection: Collection, embedder: Embedder) -> None:
         self._collection = collection
         self._embedder = embedder
-        stored = collection.get(include=["documents", "metadatas"])
-        self._ids = stored["ids"]
-        self._texts = dict(zip(self._ids, stored["documents"] or [], strict=True))
-        self._names = {
-            doc_id: str(meta["name"])
-            for doc_id, meta in zip(self._ids, stored["metadatas"] or [], strict=True)
-        }
+        stored = collection.get(include=["documents"])
+        self._bm25_ids = stored["ids"]
         # BM25 over exactly the stored chunks, so both retrievers rank the same corpus.
-        corpus = [tokenize(self._texts[doc_id]) for doc_id in self._ids]
+        corpus = [tokenize(doc) for doc in stored["documents"] or []]
         self._bm25 = BM25Okapi(corpus) if corpus else None
 
     def search(self, query: str, k: int = 5) -> list[Hit]:
-        if not self._ids or k <= 0:
-            return []
-        fused = reciprocal_rank_fusion([self._vector_ranking(query), self._bm25_ranking(query)])
-        return [
-            Hit(sku=doc_id, name=self._names[doc_id], score=score, text=self._texts[doc_id])
-            for doc_id, score in fused[:k]
+        if k <= 0 or not query.strip():
+            return []  # an empty query would just return arbitrary neighbours
+        depth = max(CANDIDATES, k)
+        fused = reciprocal_rank_fusion(
+            [self._vector_ranking(query, depth), self._bm25_ranking(query, depth)]
+        )
+        if not fused:
+            return []  # empty index (Chroma rejects get(ids=[]))
+        # Resolve against the live index: ingest may have added or removed products
+        # since this Retriever was built.
+        live = self._collection.get(
+            ids=[doc_id for doc_id, _ in fused], include=["documents", "metadatas"]
+        )
+        current = {
+            doc_id: (str(meta["name"]), doc)
+            for doc_id, doc, meta in zip(
+                live["ids"], live["documents"] or [], live["metadatas"] or [], strict=True
+            )
+        }
+        hits = [
+            Hit(sku=doc_id, name=current[doc_id][0], score=score, text=current[doc_id][1])
+            for doc_id, score in fused
+            if doc_id in current
         ]
+        return hits[:k]
 
-    def _vector_ranking(self, query: str) -> list[str]:
+    def _vector_ranking(self, query: str, depth: int) -> list[str]:
+        n_results = min(depth, self._collection.count())
+        if n_results == 0:
+            return []
         result = self._collection.query(
             query_embeddings=self._embedder.embed_query(query).reshape(1, -1),
-            n_results=min(CANDIDATES, len(self._ids)),
+            n_results=n_results,
             include=[],
         )
         return result["ids"][0]
 
-    def _bm25_ranking(self, query: str) -> list[str]:
-        assert self._bm25 is not None  # search() returns early on an empty index
+    def _bm25_ranking(self, query: str, depth: int) -> list[str]:
+        if self._bm25 is None:
+            return []
         scores = np.asarray(self._bm25.get_scores(tokenize(query)), dtype=np.float64)
         # Only documents sharing at least one query term count as ranked by BM25.
         order = [i for i in np.argsort(-scores, kind="stable") if scores[i] > 0]
-        return [self._ids[i] for i in order[:CANDIDATES]]
+        return [self._bm25_ids[i] for i in order[:depth]]
