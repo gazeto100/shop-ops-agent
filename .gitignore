@@ -11,3 +11,5 @@ data/*.csv
 data/feeds/
 *.log
 .DS_Store
+.coverage
+.coverage.*
