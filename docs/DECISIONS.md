@@ -68,3 +68,16 @@ model in `tests/integration/` (CI caches the model); unit tests use fakes.
   configured" (details only in server logs), provider outages -> "unavailable" with
   `Retry-After`. The service builds the LLM and opens the index before loading the
   embedding model, because `lru_cache` retries a failed build on every request.
+
+## 2026-10-27 — Agent tools: registry, audiences, live catalog
+- **`pytest-cov` (dev):** measures the "100% unit coverage of tool logic" criterion;
+  `make test` (which CI now calls) fails below 100% line+branch on `agent/tools`.
+- **Audiences:** `compare_supplier_price` exposes cost prices, so it is `operator`-only. The
+  registry lists and runs tools per audience; a customer calling it gets the same
+  "unknown tool" error as for a tool that doesn't exist.
+- **The registry never raises:** unknown tool, invalid arguments (inputs forbid extra
+  fields) or a crashing tool come back as a typed `ToolError` for the model to read.
+- **Supplier gap = (ours − supplier) / ours × 100**, in BGN (the only currency both prices
+  share), strictly greater than the threshold, computed in `Decimal`.
+- **Price/stock come from the feed CSV (`CATALOG_PATH`)**, re-read when its mtime changes;
+  a rejected new feed keeps the last good one. A shop DB/API can replace `Catalog` later.

@@ -27,6 +27,8 @@ class Settings(BaseSettings):
 
     embedding_model: str = "intfloat/multilingual-e5-small"
     chroma_path: str = "./data/chroma"
+    # Live price/stock source for the tools (#6); re-read whenever the file changes.
+    catalog_path: str = "./data/products.sample.csv"
 
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""

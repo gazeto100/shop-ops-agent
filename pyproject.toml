@@ -28,6 +28,7 @@ dev = [
   "ruff>=0.6",
   "mypy>=1.11",
   "pre-commit>=3.8",
+  "pytest-cov>=7.1.0",
 ]
 
 # Linux PyPI torch bundles CUDA (~3 GB of wheels). Embeddings run on CPU, so use the
