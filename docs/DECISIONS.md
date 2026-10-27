@@ -51,7 +51,20 @@ model in `tests/integration/` (CI caches the model); unit tests use fakes.
   is the model default. Revisit if we switch to an Opus/Sonnet model or the API changes.
 - **Ollama via its OpenAI-compatible endpoint** with the `openai` SDK: no new dependency,
   one message/tool mapping for two providers.
-- **Reply language is decided in code** (Cyrillic -> bg, Latin-only -> en) and stated in
-  the prompt, so it's deterministic and unit-testable instead of left to the model.
-- **Citations are verified:** only retrieved products whose sku the answer cites as
-  `[sku: name]`; a sku the model invents is dropped.
+- **Reply language is decided in code** and stated in the prompt, so it's deterministic
+  and unit-testable: English only for Latin script containing unambiguous English words;
+  Bulgarian otherwise, including Bulgarian typed in Latin letters ("imate li boiler").
+- **Citations are verified:** only retrieved products whose code the answer cites. The
+  parser accepts `[CODE: name]` and `[sku: CODE: name]` (the live model copied the word
+  "sku" from an abstract instruction; the prompt now shows a fictitious concrete example
+  instead, so the model can't mistake it for a real product to cite).
+- **Prices/stock and invented products are enforced in code, not only by the prompt.** An
+  answer with a money amount or a stock count (no tool can supply one before #6), or one
+  citing a product the search didn't return, is replaced with a safe reply; the reason is
+  on `ChatResult.guardrail` and logged. From #6 on, allow figures only when they appear
+  verbatim in that turn's tool results. Availability claims without numbers ("наличен е")
+  are not caught by this guard; the evals cover them.
+- **Failures are 503s, never bare 500s:** config/index problems -> generic "not
+  configured" (details only in server logs), provider outages -> "unavailable" with
+  `Retry-After`. The service builds the LLM and opens the index before loading the
+  embedding model, because `lru_cache` retries a failed build on every request.

@@ -2,12 +2,11 @@
 
 import hashlib
 from collections.abc import Sequence
-from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
-from shop_ops_agent.llm import LLMResponse, Message
+from shop_ops_agent.llm import LLMResponse, Message, ToolSpec
 from shop_ops_agent.rag.retriever import Hit
 
 
@@ -16,10 +15,10 @@ class FakeLLM:
 
     def __init__(self, responses: list[LLMResponse] | None = None) -> None:
         self._responses = list(responses or [LLMResponse(content="ok")])
-        self.calls: list[tuple[list[Message], list[dict[str, Any]] | None]] = []
+        self.calls: list[tuple[list[Message], list[ToolSpec] | None]] = []
 
     async def complete(
-        self, messages: list[Message], tools: list[dict[str, Any]] | None = None
+        self, messages: list[Message], tools: list[ToolSpec] | None = None
     ) -> LLMResponse:
         # Snapshot: callers (the agent loop) keep appending to the same list.
         self.calls.append((list(messages), tools))

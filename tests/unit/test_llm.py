@@ -3,6 +3,7 @@
 from typing import Any, cast
 
 import anthropic
+import httpx2
 import openai
 import pytest
 from anthropic.types import Message as AnthropicMessage
@@ -13,14 +14,16 @@ from shop_ops_agent.llm import (
     AnthropicLLM,
     LLMConfigError,
     LLMRefusalError,
+    LLMUnavailableError,
     Message,
     OllamaLLM,
     OpenAILLM,
     ToolCall,
+    ToolSpec,
     create_llm,
 )
 
-TOOLS = [
+TOOLS: list[ToolSpec] = [
     {
         "name": "check_stock_and_price",
         "description": "Live price and stock for a sku.",
@@ -40,6 +43,8 @@ class _Recorder:
 
     async def create(self, **kwargs: Any) -> object:
         self.kwargs = kwargs
+        if isinstance(self.response, Exception):
+            raise self.response
         return self.response
 
 
@@ -224,6 +229,42 @@ async def test_tool_result_turns_are_rejected_until_the_agent_loop(
 ) -> None:
     with pytest.raises(NotImplementedError, match="#7"):
         await llm.complete([*CONVERSATION, Message(role="tool", content="{}", tool_call_id="t")])
+
+
+# --- Provider failures -----------------------------------------------------------------
+
+_REQUEST = httpx2.Request("POST", "https://api.example.test/v1/messages")
+
+
+def _rate_limited(sdk: Any, retry_after: str | None) -> Exception:
+    headers = {"retry-after": retry_after} if retry_after is not None else {}
+    response = httpx2.Response(429, headers=headers, request=_REQUEST)
+    return cast(Exception, sdk.RateLimitError("rate limited", response=response, body=None))
+
+
+@pytest.mark.parametrize("sdk", [anthropic, openai])
+@pytest.mark.parametrize(("header", "expected"), [("7", 7), ("2.5", 2), (None, None)])
+async def test_rate_limit_becomes_unavailable_with_retry_after(
+    sdk: Any, header: str | None, expected: int | None
+) -> None:
+    llm, recorder = (anthropic_stub if sdk is anthropic else openai_stub)()
+    recorder.response = _rate_limited(sdk, header)
+
+    with pytest.raises(LLMUnavailableError) as exc:
+        await llm.complete(CONVERSATION)
+
+    assert exc.value.retry_after == expected
+
+
+@pytest.mark.parametrize("sdk", [anthropic, openai])
+async def test_connection_error_becomes_unavailable(sdk: Any) -> None:
+    llm, recorder = (anthropic_stub if sdk is anthropic else openai_stub)()
+    recorder.response = sdk.APIConnectionError(request=_REQUEST)
+
+    with pytest.raises(LLMUnavailableError) as exc:
+        await llm.complete(CONVERSATION)
+
+    assert exc.value.retry_after is None
 
 
 # --- Provider selection ----------------------------------------------------------------

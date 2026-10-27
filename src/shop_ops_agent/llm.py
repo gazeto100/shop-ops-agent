@@ -1,7 +1,8 @@
 """Provider-agnostic LLM interface and the OpenAI / Anthropic / Ollama adapters.
 
-Tool definitions use one neutral shape, `{"name", "description", "parameters"}` with
-`parameters` a JSON Schema; each adapter translates it. Tool *results* (role "tool")
+Tool definitions use one neutral shape, `ToolSpec`; each adapter translates it. Provider
+failures (network, rate limits, 5xx, auth) surface as `LLMUnavailableError`, so callers
+never handle SDK-specific exceptions. Tool *results* (role "tool")
 need assistant tool-call turns and, on Claude, replayed thinking blocks, which `Message`
 can't carry yet; the agent loop (#7) adds them, so adapters reject them for now.
 """
@@ -9,7 +10,7 @@ can't carry yet; the agent loop (#7) adds them, so adapters reject them for now.
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol, assert_never
+from typing import Any, Literal, NotRequired, Protocol, TypedDict, assert_never
 
 import anthropic
 import openai
@@ -43,11 +44,19 @@ class LLMResponse:
     usage: dict[str, int] = field(default_factory=dict)
 
 
+class ToolSpec(TypedDict):
+    """A tool the model may call; `parameters` is the JSON Schema of its arguments."""
+
+    name: str
+    description: NotRequired[str]
+    parameters: dict[str, Any]
+
+
 class LLM(Protocol):
     async def complete(
         self,
         messages: list[Message],
-        tools: list[dict[str, Any]] | None = None,
+        tools: list[ToolSpec] | None = None,
     ) -> LLMResponse: ...
 
 
@@ -57,6 +66,22 @@ class LLMRefusalError(Exception):
 
 class LLMConfigError(Exception):
     """The selected provider can't be used with the current settings."""
+
+
+class LLMUnavailableError(Exception):
+    """The provider call failed (network, rate limit, server or auth error)."""
+
+    def __init__(self, message: str, retry_after: int | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after  # seconds, when the provider said so (429)
+
+
+def _retry_after(headers: Any) -> int | None:
+    value = headers.get("retry-after")
+    try:
+        return max(0, int(float(value))) if value is not None else None
+    except ValueError:
+        return None  # HTTP-date form; callers fall back to their own default
 
 
 def _reject_tool_turns(messages: Sequence[Message]) -> None:
@@ -75,7 +100,7 @@ class AnthropicLLM:
         self._client = client
 
     async def complete(
-        self, messages: list[Message], tools: list[dict[str, Any]] | None = None
+        self, messages: list[Message], tools: list[ToolSpec] | None = None
     ) -> LLMResponse:
         _reject_tool_turns(messages)
         # System text goes in the top-level `system` field, not in `messages`.
@@ -95,13 +120,19 @@ class AnthropicLLM:
             }
             for t in tools or []
         ]
-        response = await self._client.messages.create(
-            model=self._model,
-            max_tokens=self.MAX_TOKENS,
-            system=system or anthropic.omit,
-            messages=turns,
-            tools=tool_params or anthropic.omit,
-        )
+        try:
+            response = await self._client.messages.create(
+                model=self._model,
+                max_tokens=self.MAX_TOKENS,
+                system=system or anthropic.omit,
+                messages=turns,
+                tools=tool_params or anthropic.omit,
+            )
+        # Most specific first; the SDK has already retried 429/5xx/connection errors.
+        except anthropic.RateLimitError as e:
+            raise LLMUnavailableError(str(e), _retry_after(e.response.headers)) from e
+        except anthropic.APIError as e:
+            raise LLMUnavailableError(str(e)) from e
         # Check before reading content: a refusal is a normal 200 response.
         if response.stop_reason == "refusal":
             raise LLMRefusalError(str(response.stop_details))
@@ -125,7 +156,7 @@ class OpenAILLM:
         self._client = client
 
     async def complete(
-        self, messages: list[Message], tools: list[dict[str, Any]] | None = None
+        self, messages: list[Message], tools: list[ToolSpec] | None = None
     ) -> LLMResponse:
         _reject_tool_turns(messages)
         turns: list[ChatCompletionMessageParam] = []
@@ -148,9 +179,14 @@ class OpenAILLM:
             }
             for t in tools or []
         ]
-        response = await self._client.chat.completions.create(
-            model=self._model, messages=turns, tools=tool_params or openai.omit
-        )
+        try:
+            response = await self._client.chat.completions.create(
+                model=self._model, messages=turns, tools=tool_params or openai.omit
+            )
+        except openai.RateLimitError as e:
+            raise LLMUnavailableError(str(e), _retry_after(e.response.headers)) from e
+        except openai.APIError as e:
+            raise LLMUnavailableError(str(e)) from e
         message = response.choices[0].message
         if message.refusal:
             raise LLMRefusalError(message.refusal)
