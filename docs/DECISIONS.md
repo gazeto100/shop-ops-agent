@@ -42,9 +42,13 @@ model in `tests/integration/` (CI caches the model); unit tests use fakes.
 - **Per-provider default model** when `LLM_MODEL` is empty (openai `gpt-4o-mini`,
   anthropic `claude-haiku-5-5`, ollama `llama3.2`), so switching `LLM_PROVIDER` alone
   never sends one vendor's model name to another; an explicit `LLM_MODEL` wins.
-- **Claude adapter** follows the current API: no sampling params (rejected), explicit
-  `effort` (low, for chat), content read by block type (Haiku 5.5 thinks by default), and
-  `stop_reason == "refusal"` checked before content. Haiku has no server-side fallback.
+- **Claude adapter** follows the current API: no sampling params (rejected), content read
+  by block type (Haiku 5.5 thinks by default), and `stop_reason == "refusal"` checked
+  before content. Haiku has no server-side fallback.
+- **No `effort` on Haiku:** a live call to `claude-haiku-5-5` returned 400 *"This model
+  does not support the effort parameter"* (2026-10-27), although Anthropic's reference
+  docs list effort for Haiku 5.5. The adapter never sends `output_config`; thinking depth
+  is the model default. Revisit if we switch to an Opus/Sonnet model or the API changes.
 - **Ollama via its OpenAI-compatible endpoint** with the `openai` SDK: no new dependency,
   one message/tool mapping for two providers.
 - **Reply language is decided in code** (Cyrillic -> bg, Latin-only -> en) and stated in

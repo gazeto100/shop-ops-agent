@@ -65,9 +65,8 @@ def _reject_tool_turns(messages: Sequence[Message]) -> None:
 
 
 class AnthropicLLM:
-    # Haiku-class chat: low effort is Anthropic's recommendation for chat routes. Current
-    # Claude models think by default and reject temperature/top_p, so neither is sent.
-    EFFORT: Literal["low", "medium", "high", "xhigh", "max"] = "low"
+    # No `effort` and no temperature/top_p: the live API rejects `effort` for
+    # claude-haiku-5-5 (400, see DECISIONS.md) and current models reject sampling params.
     # Thinking counts toward max_tokens, so leave room beyond the visible answer.
     MAX_TOKENS = 8000
 
@@ -102,7 +101,6 @@ class AnthropicLLM:
             system=system or anthropic.omit,
             messages=turns,
             tools=tool_params or anthropic.omit,
-            output_config={"effort": self.EFFORT},
         )
         # Check before reading content: a refusal is a normal 200 response.
         if response.stop_reason == "refusal":

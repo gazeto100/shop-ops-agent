@@ -105,9 +105,9 @@ async def test_anthropic_request_shape() -> None:
             "input_schema": TOOLS[0]["parameters"],
         }
     ]
-    assert sent.kwargs["output_config"] == {"effort": "low"}
-    # Current Claude models reject sampling parameters.
-    assert not {"temperature", "top_p", "top_k"} & sent.kwargs.keys()
+    # Never sent: effort 400s on claude-haiku-5-5 (live API); sampling params 400 on
+    # current Claude models.
+    assert not {"output_config", "temperature", "top_p", "top_k"} & sent.kwargs.keys()
 
 
 async def test_anthropic_omits_tools_and_system_when_absent() -> None:
