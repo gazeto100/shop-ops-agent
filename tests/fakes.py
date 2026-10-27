@@ -8,6 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from shop_ops_agent.llm import LLMResponse, Message
+from shop_ops_agent.rag.retriever import Hit
 
 
 class FakeLLM:
@@ -50,3 +51,15 @@ class FakeEmbedder:
         digest = hashlib.sha256(text.encode()).digest()[: cls.DIM]
         v = np.frombuffer(digest, dtype=np.uint8).astype(np.float32) + 1
         return v / np.linalg.norm(v)
+
+
+class FakeRetriever:
+    """Returns fixed hits for any query. Records every (query, k)."""
+
+    def __init__(self, hits: Sequence[Hit] = ()) -> None:
+        self._hits = list(hits)
+        self.searches: list[tuple[str, int]] = []
+
+    def search(self, query: str, k: int = 5) -> list[Hit]:
+        self.searches.append((query, k))
+        return self._hits[:k]

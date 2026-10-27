@@ -15,8 +15,8 @@ dependencies = [
   # Direct dep only so [tool.uv.sources] can route it to the CPU-only build (see below)
   "torch>=2.14",
   "rank-bm25>=0.2.2",
-  "openai>=1.50",
-  "anthropic>=0.40",
+  "openai>=3.37",
+  "anthropic>=2.1",
   "langfuse>=2.50",
   "python-dotenv>=1.0",
 ]

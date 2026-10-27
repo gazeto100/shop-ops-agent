@@ -33,6 +33,13 @@ curl -X POST localhost:8000/chat -H 'content-type: application/json' \
   -d '{"session_id":"demo","message":"Има ли наличен бойлер 80 литра и каква е цената?"}'
 ```
 
+`/chat` returns `{"answer": "...", "citations": [{"sku": "...", "name": "..."}], "tool_calls": []}`.
+The answer is grounded in the retrieved catalog excerpt and written in the user's language
+(Bulgarian unless the message is in English). `citations` lists only retrieved products the
+answer actually cites. The assistant never states prices or stock: until the stock/price
+tools land (#6) it says it can't confirm them. `LLM_MODEL` may be left empty to use the
+provider's default model (see `.env.example`).
+
 ### Docker
 ```bash
 make docker                                   # CPU-only image, ~0.6 GB compressed
