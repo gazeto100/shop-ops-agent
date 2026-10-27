@@ -11,8 +11,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from shop_ops_agent.agent.chat import Searcher
 from shop_ops_agent.agent.tools.catalog import Catalog
+from shop_ops_agent.rag.retriever import Searcher
 
 
 class _Input(BaseModel):

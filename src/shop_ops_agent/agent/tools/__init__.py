@@ -2,7 +2,6 @@
 
 from functools import partial
 
-from shop_ops_agent.agent.chat import Searcher
 from shop_ops_agent.agent.tools.catalog import Catalog
 from shop_ops_agent.agent.tools.definitions import (
     CheckStockAndPriceInput,
@@ -13,6 +12,7 @@ from shop_ops_agent.agent.tools.definitions import (
     search_products,
 )
 from shop_ops_agent.agent.tools.registry import Audience, Tool, ToolError, ToolRegistry
+from shop_ops_agent.rag.retriever import Searcher
 
 __all__ = ["Audience", "Catalog", "ToolError", "ToolRegistry", "build_registry"]
 

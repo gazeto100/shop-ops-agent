@@ -1,0 +1,73 @@
+[
+  {
+    "name": "search_products",
+    "description": "Find catalog products matching a description. Returns codes, names and descriptions only - use check_stock_and_price for price/stock.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "description": "What the user is looking for, in their words.",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "k": {
+          "default": 5,
+          "description": "How many products to return.",
+          "maximum": 10,
+          "minimum": 1,
+          "title": "K",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "title": "SearchProductsInput",
+      "type": "object"
+    }
+  },
+  {
+    "name": "check_stock_and_price",
+    "description": "Current selling price (EUR and BGN) and stock for one product code. Returns status 'not_found' for an unknown code.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "sku": {
+          "description": "Product code, e.g. BOIL-80-A.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Sku",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sku"
+      ],
+      "title": "CheckStockAndPriceInput",
+      "type": "object"
+    }
+  },
+  {
+    "name": "compare_supplier_price",
+    "description": "Products whose supplier price is more than threshold_pct percent below our selling price, largest gap first. Internal data.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "threshold_pct": {
+          "description": "Return products whose supplier price is more than this many percent below our selling price.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Threshold Pct",
+          "type": "number"
+        }
+      },
+      "required": [
+        "threshold_pct"
+      ],
+      "title": "CompareSupplierPriceInput",
+      "type": "object"
+    }
+  }
+]

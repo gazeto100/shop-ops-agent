@@ -292,11 +292,72 @@ def test_bad_new_feed_keeps_the_last_good_one(feed: Path, caplog: pytest.LogCapt
     bump_mtime(feed)
 
     assert len(catalog.products()) == 7
-    assert "rejected, keeping previous version" in caplog.text
+    assert "not updated, serving previous version" in caplog.text
 
 
 def test_bad_first_feed_raises(feed: Path) -> None:
     feed.write_text("sku,name\nBROKEN,row\n", encoding="utf-8")
 
     with pytest.raises(ProductValidationError):
+        Catalog(feed).products()
+
+
+def test_unreadable_feed_after_a_good_load_serves_the_previous_one(
+    feed: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    catalog = Catalog(feed)
+    assert catalog.get("BOIL-80-A") is not None
+
+    feed.unlink()  # e.g. mid-way through a non-atomic replace
+
+    assert catalog.get("BOIL-80-A") is not None
+    assert "serving previous version" in caplog.text
+
+
+def test_unreadable_first_feed_raises(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        Catalog(tmp_path / "missing.csv").products()
+
+
+def test_feed_vanishing_between_stat_and_open_is_retried(
+    feed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    catalog = Catalog(feed)
+    catalog.products()
+    feed.write_text(
+        feed.read_text(encoding="utf-8").replace(",369.64,4,", ",369.64,9,"), encoding="utf-8"
+    )
+    bump_mtime(feed)
+
+    def vanished(_: Path) -> None:
+        raise FileNotFoundError(feed)
+
+    monkeypatch.setattr("shop_ops_agent.agent.tools.catalog.load_products", vanished)
+    assert catalog.get("BOIL-80-A").stock_qty == 4  # type: ignore[union-attr]  # previous
+
+    monkeypatch.undo()  # the file is readable again: not cached as "seen", so re-read now
+    assert catalog.get("BOIL-80-A").stock_qty == 9  # type: ignore[union-attr]
+
+
+def test_a_copy_that_keeps_the_mtime_but_changes_size_is_reloaded(feed: Path) -> None:
+    catalog = Catalog(feed)
+    assert catalog.get("BOIL-80-A").stock_qty == 4  # type: ignore[union-attr]
+    before = feed.stat()
+
+    feed.write_text(
+        feed.read_text(encoding="utf-8").replace(",369.64,4,", ",369.64,12,"), encoding="utf-8"
+    )
+    os.utime(feed, ns=(before.st_atime_ns, before.st_mtime_ns))  # like rsync -t / cp -p
+
+    assert feed.stat().st_mtime_ns == before.st_mtime_ns
+    assert catalog.get("BOIL-80-A").stock_qty == 12  # type: ignore[union-attr]
+
+
+def test_codes_differing_only_in_case_are_a_rejected_duplicate(feed: Path) -> None:
+    # Before the fix this loaded 7 of 8 rows and BOIL-80-A silently reported stock 0.
+    lines = feed.read_text(encoding="utf-8").splitlines()
+    lines.append(lines[1].replace("BOIL-80-A", "boil-80-a").replace(",369.64,4,", ",369.64,0,"))
+    feed.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    with pytest.raises(ProductValidationError, match=r"line 9 \(sku boil-80-a\): duplicate sku"):
         Catalog(feed).products()
