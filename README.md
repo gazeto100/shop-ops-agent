@@ -33,6 +33,24 @@ curl -X POST localhost:8000/chat -H 'content-type: application/json' \
   -d '{"session_id":"demo","message":"Има ли наличен бойлер 80 литра и каква е цената?"}'
 ```
 
+`/chat` returns `{"answer": "...", "citations": [{"sku": "...", "name": "..."}], "tool_calls": []}`.
+The answer is grounded in the retrieved catalog excerpt and written in the user's language
+(Bulgarian unless the message is in English). `citations` lists only retrieved products the
+answer actually cites. The assistant never states prices or stock: until the stock/price
+tools land (#6) it says it can't confirm them, and an answer that states a price/stock
+figure or cites a product the search didn't return is replaced by a safe reply. A
+misconfigured service or an unavailable LLM provider returns `503` (with `Retry-After`).
+`LLM_MODEL` may be left empty to use the provider's default model (see `.env.example`).
+
+> **Windows (Git Bash):** an inline `curl -d '…'` with Cyrillic text is sent in the console
+> code page, not UTF-8, so the server receives garbled text. Put the body in a UTF-8 file
+> and send it as-is:
+>
+> ```bash
+> printf '%s' '{"session_id":"demo","message":"Има ли наличен бойлер 80 литра?"}' > chat.json
+> curl -X POST localhost:8000/chat -H 'content-type: application/json' --data-binary @chat.json
+> ```
+
 ### Docker
 ```bash
 make docker                                   # CPU-only image, ~0.6 GB compressed

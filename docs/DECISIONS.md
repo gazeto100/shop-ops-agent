@@ -37,3 +37,34 @@ queries against Bulgarian-only chunks missed (#4 comment): we fix that on the da
 with an optional `name_en` feed column appended to the chunk, not by translating queries
 (no extra model call, no translation errors). Ranking quality is tested with the real
 model in `tests/integration/` (CI caches the model); unit tests use fakes.
+
+## 2026-10-27 — /chat: provider adapters, grounding and citations
+- **Per-provider default model** when `LLM_MODEL` is empty (openai `gpt-4o-mini`,
+  anthropic `claude-haiku-5-5`, ollama `llama3.2`), so switching `LLM_PROVIDER` alone
+  never sends one vendor's model name to another; an explicit `LLM_MODEL` wins.
+- **Claude adapter** follows the current API: no sampling params (rejected), content read
+  by block type (Haiku 5.5 thinks by default), and `stop_reason == "refusal"` checked
+  before content. Haiku has no server-side fallback.
+- **No `effort` on Haiku:** a live call to `claude-haiku-5-5` returned 400 *"This model
+  does not support the effort parameter"* (2026-10-27), although Anthropic's reference
+  docs list effort for Haiku 5.5. The adapter never sends `output_config`; thinking depth
+  is the model default. Revisit if we switch to an Opus/Sonnet model or the API changes.
+- **Ollama via its OpenAI-compatible endpoint** with the `openai` SDK: no new dependency,
+  one message/tool mapping for two providers.
+- **Reply language is decided in code** and stated in the prompt, so it's deterministic
+  and unit-testable: English only for Latin script containing unambiguous English words;
+  Bulgarian otherwise, including Bulgarian typed in Latin letters ("imate li boiler").
+- **Citations are verified:** only retrieved products whose code the answer cites. The
+  parser accepts `[CODE: name]` and `[sku: CODE: name]` (the live model copied the word
+  "sku" from an abstract instruction; the prompt now shows a fictitious concrete example
+  instead, so the model can't mistake it for a real product to cite).
+- **Prices/stock and invented products are enforced in code, not only by the prompt.** An
+  answer with a money amount or a stock count (no tool can supply one before #6), or one
+  citing a product the search didn't return, is replaced with a safe reply; the reason is
+  on `ChatResult.guardrail` and logged. From #6 on, allow figures only when they appear
+  verbatim in that turn's tool results. Availability claims without numbers ("наличен е")
+  are not caught by this guard; the evals cover them.
+- **Failures are 503s, never bare 500s:** config/index problems -> generic "not
+  configured" (details only in server logs), provider outages -> "unavailable" with
+  `Retry-After`. The service builds the LLM and opens the index before loading the
+  embedding model, because `lru_cache` retries a failed build on every request.

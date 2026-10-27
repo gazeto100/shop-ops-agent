@@ -2,12 +2,12 @@
 
 import hashlib
 from collections.abc import Sequence
-from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
-from shop_ops_agent.llm import LLMResponse, Message
+from shop_ops_agent.llm import LLMResponse, Message, ToolSpec
+from shop_ops_agent.rag.retriever import Hit
 
 
 class FakeLLM:
@@ -15,10 +15,10 @@ class FakeLLM:
 
     def __init__(self, responses: list[LLMResponse] | None = None) -> None:
         self._responses = list(responses or [LLMResponse(content="ok")])
-        self.calls: list[tuple[list[Message], list[dict[str, Any]] | None]] = []
+        self.calls: list[tuple[list[Message], list[ToolSpec] | None]] = []
 
     async def complete(
-        self, messages: list[Message], tools: list[dict[str, Any]] | None = None
+        self, messages: list[Message], tools: list[ToolSpec] | None = None
     ) -> LLMResponse:
         # Snapshot: callers (the agent loop) keep appending to the same list.
         self.calls.append((list(messages), tools))
@@ -50,3 +50,15 @@ class FakeEmbedder:
         digest = hashlib.sha256(text.encode()).digest()[: cls.DIM]
         v = np.frombuffer(digest, dtype=np.uint8).astype(np.float32) + 1
         return v / np.linalg.norm(v)
+
+
+class FakeRetriever:
+    """Returns fixed hits for any query. Records every (query, k)."""
+
+    def __init__(self, hits: Sequence[Hit] = ()) -> None:
+        self._hits = list(hits)
+        self.searches: list[tuple[str, int]] = []
+
+    def search(self, query: str, k: int = 5) -> list[Hit]:
+        self.searches.append((query, k))
+        return self._hits[:k]
