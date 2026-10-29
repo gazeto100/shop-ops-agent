@@ -8,7 +8,7 @@ import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Literal
 
 from shop_ops_agent.agent.prompts import (
     PRICE_UNAVAILABLE_REPLY,
@@ -20,7 +20,7 @@ from shop_ops_agent.agent.prompts import (
     user_prompt,
 )
 from shop_ops_agent.llm import LLM, LLMRefusalError, Message, ToolCall
-from shop_ops_agent.rag.retriever import Hit
+from shop_ops_agent.rag.retriever import Hit, Searcher
 
 log = logging.getLogger(__name__)
 
@@ -46,10 +46,6 @@ _PRICE_OR_STOCK = re.compile(
 )
 
 type Guardrail = Literal["price_or_stock", "unverified_product"]
-
-
-class Searcher(Protocol):
-    def search(self, query: str, k: int = 5) -> list[Hit]: ...
 
 
 @dataclass(frozen=True)

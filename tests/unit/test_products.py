@@ -109,6 +109,12 @@ def test_duplicate_sku_points_at_first_occurrence(tmp_path: Path) -> None:
     assert errors == ["line 3 (sku A-1): duplicate sku (first seen on line 2)"]
 
 
+def test_duplicate_sku_check_ignores_case_and_spaces(tmp_path: Path) -> None:
+    errors = error_lines(write_feed(tmp_path, GOOD, GOOD.replace("A-1", " a-1 ")))
+
+    assert errors == ["line 3 (sku a-1): duplicate sku (first seen on line 2)"]
+
+
 def test_missing_column_fails_once_for_the_header(tmp_path: Path) -> None:
     header = HEADER.replace(",stock_qty", "")
     errors = error_lines(write_feed(tmp_path, GOOD, header=header))

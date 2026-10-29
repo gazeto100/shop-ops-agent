@@ -32,6 +32,12 @@ class Product(BaseModel):
 REQUIRED_COLUMNS = frozenset(n for n, f in Product.model_fields.items() if f.is_required())
 
 
+def normalize_sku(sku: str) -> str:
+    """Identity of a product code: case and surrounding spaces don't matter. Used both for
+    the feed's duplicate check and for lookups, so the two can never disagree."""
+    return sku.strip().upper()
+
+
 @dataclass(frozen=True)
 class RowError:
     line: int | None  # None: the problem is with the file as a whole
@@ -95,11 +101,12 @@ def _validate(reader: "csv.DictReader[str]") -> list[Product]:
                 for err in e.errors()
             )
             continue
-        if product.sku in first_line_of:
-            msg = f"duplicate sku (first seen on line {first_line_of[product.sku]})"
+        key = normalize_sku(product.sku)  # "boil-80-a" duplicates "BOIL-80-A"
+        if key in first_line_of:
+            msg = f"duplicate sku (first seen on line {first_line_of[key]})"
             errors.append(RowError(line, product.sku, msg))
             continue
-        first_line_of[product.sku] = line
+        first_line_of[key] = line
         products.append(product)
 
     if errors:

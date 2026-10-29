@@ -66,7 +66,7 @@ docs/
 ```
 make setup      # uv sync + pre-commit install
 make lint       # ruff check + ruff format --check + mypy
-make test       # pytest tests/unit
+make test       # pytest tests/unit (+ 100% coverage gate on agent/tools)
 make test-integration  # pytest tests/integration (downloads the embedding model once)
 make evals      # pytest tests/evals (needs RUN_LIVE_EVALS=1 + provider key)
 make ingest     # python -m shop_ops_agent.ingest data/products.sample.csv

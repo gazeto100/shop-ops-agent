@@ -1,5 +1,9 @@
 """Prompts for the shop assistant. Bump PROMPT_VERSION on every change to the text, and
-add a golden-set case (tests/evals/golden.jsonl) that would catch a regression."""
+add a golden-set case (tests/evals/golden.jsonl) that would catch a regression.
+
+Tool names, descriptions and schemas (agent/tools) are prompt text too: the model reads
+them. Changing one also bumps PROMPT_VERSION; tests/unit/test_tool_specs.py snapshots
+them so such a change can't slip through unnoticed."""
 
 from collections.abc import Sequence
 from typing import Literal

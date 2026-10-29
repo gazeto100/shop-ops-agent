@@ -9,6 +9,7 @@ import re
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
 import numpy as np
 from chromadb.api.models.Collection import Collection
@@ -32,6 +33,13 @@ class Hit:
 
     def citation(self) -> str:
         return f"[{self.sku}: {self.name}]"
+
+
+class Searcher(Protocol):
+    """What callers need from a retriever. Defined here, next to `Hit`, so both the chat
+    service and the tools can depend on it without importing each other."""
+
+    def search(self, query: str, k: int = 5) -> list[Hit]: ...
 
 
 def tokenize(text: str) -> list[str]:
