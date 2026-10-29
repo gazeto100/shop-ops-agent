@@ -1,5 +1,6 @@
 """Adapters against stub SDK clients that return real SDK response objects (no network)."""
 
+import json
 from typing import Any, cast
 
 import anthropic
@@ -223,12 +224,155 @@ def test_ollama_uses_the_openai_compatible_endpoint() -> None:
     assert llm._model == "llama3.2"
 
 
+# --- Tool round trips (#7) --------------------------------------------------------------
+
+CALL_A = ToolCall(id="tu_a", name="check_stock_and_price", arguments={"sku": "BOIL-80-A"})
+CALL_B = ToolCall(id="tu_b", name="check_stock_and_price", arguments={"sku": "KET-17-S"})
+RESULT_A = '{"status":"found","sku":"BOIL-80-A","price_eur":"189.00"}'
+RESULT_B = '{"status":"not_found","sku":"KET-17-S"}'
+
+
+def round_trip(assistant: Message) -> list[Message]:
+    return [
+        *CONVERSATION,
+        assistant,
+        Message(role="tool", content=RESULT_A, tool_call_id="tu_a"),
+        Message(role="tool", content=RESULT_B, tool_call_id="tu_b"),
+    ]
+
+
+async def test_anthropic_replays_its_own_blocks_and_groups_tool_results() -> None:
+    first, _ = anthropic_stub(
+        stop_reason="tool_use",
+        content=[
+            {"type": "thinking", "thinking": "", "signature": "SIG"},
+            {"type": "tool_use", "id": "tu_a", "name": CALL_A.name, "input": CALL_A.arguments},
+            {"type": "tool_use", "id": "tu_b", "name": CALL_B.name, "input": CALL_B.arguments},
+        ],
+    )
+    response = await first.complete(CONVERSATION, TOOLS)
+    llm, sent = anthropic_stub()
+
+    await llm.complete(round_trip(response.as_message()), TOOLS)
+
+    _, assistant, results = sent.kwargs["messages"]
+    # Claude's own blocks, thinking (signature) included, are sent back unchanged.
+    assert assistant == {"role": "assistant", "content": list(response.provider_content)}
+    # Both results in ONE user message, verbatim.
+    assert results == {
+        "role": "user",
+        "content": [
+            {"type": "tool_result", "tool_use_id": "tu_a", "content": RESULT_A},
+            {"type": "tool_result", "tool_use_id": "tu_b", "content": RESULT_B},
+        ],
+    }
+
+
+async def test_anthropic_builds_tool_use_blocks_for_a_foreign_assistant_turn() -> None:
+    llm, sent = anthropic_stub()
+    foreign = Message(role="assistant", content="Проверявам.", tool_calls=(CALL_A, CALL_B))
+
+    await llm.complete(round_trip(foreign), TOOLS)
+
+    assert sent.kwargs["messages"][1]["content"] == [
+        {"type": "text", "text": "Проверявам."},
+        {"type": "tool_use", "id": "tu_a", "name": CALL_A.name, "input": CALL_A.arguments},
+        {"type": "tool_use", "id": "tu_b", "name": CALL_B.name, "input": CALL_B.arguments},
+    ]
+
+
+async def test_anthropic_sdk_sends_the_thinking_signature_back() -> None:
+    """End to end through the real SDK (mock HTTP transport, no network)."""
+    bodies: list[dict[str, Any]] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        bodies.append(json.loads(request.content))
+        content = (
+            [
+                {"type": "thinking", "thinking": "", "signature": "SIG-42"},
+                {"type": "tool_use", "id": "tu_a", "name": CALL_A.name, "input": CALL_A.arguments},
+            ]
+            if len(bodies) == 1
+            else [{"type": "text", "text": "189.00 EUR"}]
+        )
+        return httpx2.Response(
+            200,
+            json={
+                "id": f"m{len(bodies)}",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-haiku-5-5",
+                "stop_reason": "tool_use" if len(bodies) == 1 else "end_turn",
+                "stop_sequence": None,
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+                "content": content,
+            },
+        )
+
+    client = anthropic.AsyncAnthropic(
+        api_key="test",
+        max_retries=0,
+        http_client=anthropic.DefaultAsyncHttpxClient(transport=httpx2.MockTransport(handler)),
+    )
+    llm = AnthropicLLM("claude-haiku-5-5", client)
+    first = await llm.complete(CONVERSATION, TOOLS)
+
+    final = await llm.complete(
+        [
+            *CONVERSATION,
+            first.as_message(),
+            Message(role="tool", content=RESULT_A, tool_call_id="tu_a"),
+        ],
+        TOOLS,
+    )
+
+    assert final.content == "189.00 EUR"
+    replayed = bodies[1]["messages"][1]["content"]
+    assert replayed[0] == {"type": "thinking", "thinking": "", "signature": "SIG-42"}
+    assert replayed[1]["type"] == "tool_use"
+    assert bodies[1]["messages"][2]["content"][0]["content"] == RESULT_A
+
+
+async def test_openai_maps_tool_calls_and_tool_results() -> None:
+    llm, sent = openai_stub()
+
+    await llm.complete(
+        round_trip(Message(role="assistant", content="", tool_calls=(CALL_A, CALL_B)))
+    )
+
+    _, _, assistant, result_a, result_b = sent.kwargs["messages"]
+    assert assistant == {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "tu_a",
+                "type": "function",
+                "function": {"name": CALL_A.name, "arguments": '{"sku": "BOIL-80-A"}'},
+            },
+            {
+                "id": "tu_b",
+                "type": "function",
+                "function": {"name": CALL_B.name, "arguments": '{"sku": "KET-17-S"}'},
+            },
+        ],
+    }
+    assert result_a == {"role": "tool", "tool_call_id": "tu_a", "content": RESULT_A}
+    assert result_b == {"role": "tool", "tool_call_id": "tu_b", "content": RESULT_B}
+
+
+async def test_openai_plain_assistant_turn_stays_text() -> None:
+    llm, sent = openai_stub()
+
+    await llm.complete([*CONVERSATION, Message(role="assistant", content="Здравейте!")])
+
+    assert sent.kwargs["messages"][-1] == {"role": "assistant", "content": "Здравейте!"}
+
+
 @pytest.mark.parametrize("llm", [anthropic_stub()[0], openai_stub()[0]])
-async def test_tool_result_turns_are_rejected_until_the_agent_loop(
-    llm: AnthropicLLM | OpenAILLM,
-) -> None:
-    with pytest.raises(NotImplementedError, match="#7"):
-        await llm.complete([*CONVERSATION, Message(role="tool", content="{}", tool_call_id="t")])
+async def test_tool_result_without_a_call_id_is_rejected(llm: AnthropicLLM | OpenAILLM) -> None:
+    with pytest.raises(ValueError, match="tool_call_id"):
+        await llm.complete([*CONVERSATION, Message(role="tool", content="{}")])
 
 
 # --- Provider failures -----------------------------------------------------------------

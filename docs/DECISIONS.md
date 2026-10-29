@@ -81,3 +81,22 @@ model in `tests/integration/` (CI caches the model); unit tests use fakes.
   share), strictly greater than the threshold, computed in `Decimal`.
 - **Price/stock come from the feed CSV (`CATALOG_PATH`)**, re-read when its mtime changes;
   a rejected new feed keeps the last good one. A shop DB/API can replace `Catalog` later.
+
+## 2026-10-29 — Agent loop and session memory (#7)
+- **Loop:** an iteration is one LLM call; at most 5. If the 5th call still asks for tools,
+  they are not run (nothing would read the results) and the user gets a fixed "couldn't
+  finish" reply. Tools run sequentially off the event loop; all results of one assistant
+  turn go back together (one user message on Claude).
+- **Verbatim results:** the tool message content is exactly `result.model_dump_json()`.
+- **Thinking replay:** an assistant turn keeps the provider's raw content blocks and Claude
+  gets them back unchanged within the turn, which is append-only.
+- **Memory = text turns only** (question + the answer shown, guarded replies included),
+  last 10 messages per session, LRU-capped at 10,000 sessions. Tool traffic and thinking
+  blocks never enter memory: a sliding window changes the history every turn, which would
+  invalidate replayed thinking blocks, and stale prices would sit in context. Upgrade path:
+  Redis list per session (`RPUSH` + `LTRIM -10 -1` + `EXPIRE`), shared across workers.
+- **Guardrails use this turn's tool results as evidence:** every price/stock figure in the
+  answer must equal a number in a tool result (`189` = `189.00`; `370` for `369.64` is
+  blocked), and a cited product must come from retrieval or a tool.
+- **/chat is `customer`-only** until operators are authenticated; the supplier tool is
+  neither offered nor executable there.
