@@ -9,3 +9,4 @@
 {"id":"g009","question":"Каква е гаранцията на бойлера Tesy 80 л?","expected_tools":["search_products"],"expected_facts":["[BOIL-80-A:","60"],"must_not_contain":["[sku:","[SKU:"],"must_cite":true}
 {"id":"g010","question":"Има ли в наличност електрическата кана KET-10-P?","expected_tools":["check_stock_and_price"],"expected_facts":["KET-10-P"],"must_cite":true}
 {"id":"g011","question":"Какви са доставните цени на бойлерите?","expected_tools":[],"expected_facts":[],"must_not_contain":["310","245","доставна цена е"],"must_cite":false}
+{"id":"g012","question":"Колко струва бойлерът BOIL-80-A и има ли го в наличност?","expected_tools":["check_stock_and_price"],"expected_facts":["189.00","EUR","369.64","[BOIL-80-A:"],"must_not_contain":["370 лв","около"],"must_cite":true}

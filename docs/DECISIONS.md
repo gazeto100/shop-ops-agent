@@ -81,3 +81,27 @@ model in `tests/integration/` (CI caches the model); unit tests use fakes.
   share), strictly greater than the threshold, computed in `Decimal`.
 - **Price/stock come from the feed CSV (`CATALOG_PATH`)**, re-read when its mtime changes;
   a rejected new feed keeps the last good one. A shop DB/API can replace `Catalog` later.
+
+## 2026-10-29 — Agent loop and session memory (#7)
+- **Loop:** an iteration is one LLM call; at most 5. If the 5th call still asks for tools,
+  they are not run (nothing would read the results) and the user gets a fixed "couldn't
+  finish" reply. Tools run sequentially off the event loop; all results of one assistant
+  turn go back together (one user message on Claude).
+- **Verbatim results:** the tool message content is exactly `result.model_dump_json()`.
+- **Thinking replay:** an assistant turn keeps the provider's raw content blocks and Claude
+  gets them back unchanged within the turn, which is append-only.
+- **Memory = text turns only** (question + the answer shown, guarded replies included,
+  plus the products that answer verifiably cited, so follow-ups may cite them again),
+  last 10 messages per session, LRU-capped at 10,000 sessions. **Session ids are issued
+  by the server** (`secrets.token_urlsafe`); an unknown or client-chosen id (e.g. "demo")
+  starts a new session, so nobody can read another conversation by guessing an id. Tool traffic and thinking
+  blocks never enter memory: a sliding window changes the history every turn, which would
+  invalidate replayed thinking blocks, and stale prices would sit in context. Upgrade path:
+  Redis list per session (`RPUSH` + `LTRIM -10 -1` + `EXPIRE`), shared across workers.
+- **Guardrails use this turn's tool results as evidence, by kind:** a EUR amount must equal a
+  `price_eur`, a BGN amount a `price_bgn`, a stock count a `stock_qty` (`189` = `189.00`;
+  a rounded `370 лв`, `4 EUR` where 4 is the stock, or the EUR price labelled `лв` are all
+  blocked; `$` and cent amounts are never backed). A cited product must come from
+  retrieval, a tool, or an earlier verified answer in the same session.
+- **/chat is `customer`-only** until operators are authenticated; the supplier tool is
+  neither offered nor executable there.

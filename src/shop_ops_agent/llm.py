@@ -2,32 +2,30 @@
 
 Tool definitions use one neutral shape, `ToolSpec`; each adapter translates it. Provider
 failures (network, rate limits, 5xx, auth) surface as `LLMUnavailableError`, so callers
-never handle SDK-specific exceptions. Tool *results* (role "tool")
-need assistant tool-call turns and, on Claude, replayed thinking blocks, which `Message`
-can't carry yet; the agent loop (#7) adds them, so adapters reject them for now.
+never handle SDK-specific exceptions.
+
+A tool round trip is: an assistant `Message` carrying `tool_calls` (built with
+`LLMResponse.as_message()`), then one role="tool" `Message` per call whose `content` is
+the tool's JSON result, verbatim. On Claude the assistant turn also carries the
+response's raw content blocks (`provider_content`), including thinking blocks, which
+must be sent back unchanged while the tool loop continues.
 """
 
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, NotRequired, Protocol, TypedDict, assert_never
+from typing import Any, Literal, NotRequired, Protocol, TypedDict, assert_never, cast
 
 import anthropic
 import openai
 from anthropic.types import MessageParam as AnthropicMessageParam
 from anthropic.types import ToolParam as AnthropicToolParam
+from anthropic.types import ToolResultBlockParam
 from openai.types.chat import ChatCompletionFunctionToolParam, ChatCompletionMessageParam
 
 from shop_ops_agent.config import Settings
 
 type Role = Literal["system", "user", "assistant", "tool"]
-
-
-@dataclass(frozen=True)
-class Message:
-    role: Role
-    content: str
-    tool_call_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -38,10 +36,31 @@ class ToolCall:
 
 
 @dataclass(frozen=True)
+class Message:
+    role: Role
+    content: str
+    tool_call_id: str | None = None  # role="tool": which call this result answers
+    tool_calls: tuple[ToolCall, ...] = ()  # role="assistant": the calls it made
+    # role="assistant": the provider's own content blocks, replayed unchanged (Claude
+    # requires its thinking blocks back, signatures intact, within a tool loop).
+    provider_content: tuple[object, ...] = ()
+
+
+@dataclass(frozen=True)
 class LLMResponse:
     content: str
     tool_calls: tuple[ToolCall, ...] = ()
     usage: dict[str, int] = field(default_factory=dict)
+    provider_content: tuple[object, ...] = ()
+
+    def as_message(self) -> Message:
+        """The assistant turn to append to the conversation before the tool results."""
+        return Message(
+            role="assistant",
+            content=self.content,
+            tool_calls=self.tool_calls,
+            provider_content=self.provider_content,
+        )
 
 
 class ToolSpec(TypedDict):
@@ -84,9 +103,48 @@ def _retry_after(headers: Any) -> int | None:
         return None  # HTTP-date form; callers fall back to their own default
 
 
-def _reject_tool_turns(messages: Sequence[Message]) -> None:
-    if any(m.role == "tool" for m in messages):
-        raise NotImplementedError("tool-result messages are wired up with the agent loop (#7)")
+def _tool_call_id(message: Message) -> str:
+    if message.tool_call_id is None:
+        raise ValueError("a role='tool' message needs the tool_call_id it answers")
+    return message.tool_call_id
+
+
+def _anthropic_turns(messages: Sequence[Message]) -> list[AnthropicMessageParam]:
+    turns: list[AnthropicMessageParam] = []
+    results: list[ToolResultBlockParam] = []
+
+    def flush_results() -> None:
+        # Claude wants every tool result of one assistant turn in a single user message.
+        if results:
+            turns.append({"role": "user", "content": list(results)})
+            results.clear()
+
+    for m in messages:
+        match m.role:
+            case "system":
+                pass  # sent in the top-level `system` field
+            case "tool":
+                results.append(
+                    {"type": "tool_result", "tool_use_id": _tool_call_id(m), "content": m.content}
+                )
+            case "user":
+                flush_results()
+                turns.append({"role": "user", "content": m.content})
+            case "assistant":
+                flush_results()
+                if m.provider_content:  # replay Claude's own blocks, thinking included
+                    content: Any = list(m.provider_content)
+                elif m.tool_calls:  # e.g. a turn produced by another provider
+                    content = [{"type": "text", "text": m.content}] if m.content else []
+                    content += [
+                        {"type": "tool_use", "id": c.id, "name": c.name, "input": c.arguments}
+                        for c in m.tool_calls
+                    ]
+                else:
+                    content = m.content
+                turns.append(cast(AnthropicMessageParam, {"role": "assistant", "content": content}))
+    flush_results()
+    return turns
 
 
 class AnthropicLLM:
@@ -102,16 +160,7 @@ class AnthropicLLM:
     async def complete(
         self, messages: list[Message], tools: list[ToolSpec] | None = None
     ) -> LLMResponse:
-        _reject_tool_turns(messages)
-        # System text goes in the top-level `system` field, not in `messages`.
         system = "\n\n".join(m.content for m in messages if m.role == "system")
-        turns: list[AnthropicMessageParam] = []
-        for m in messages:
-            match m.role:
-                case "user":
-                    turns.append({"role": "user", "content": m.content})
-                case "assistant":
-                    turns.append({"role": "assistant", "content": m.content})
         tool_params: list[AnthropicToolParam] = [
             {
                 "name": t["name"],
@@ -125,7 +174,7 @@ class AnthropicLLM:
                 model=self._model,
                 max_tokens=self.MAX_TOKENS,
                 system=system or anthropic.omit,
-                messages=turns,
+                messages=_anthropic_turns(messages),
                 tools=tool_params or anthropic.omit,
             )
         # Most specific first; the SDK has already retried 429/5xx/connection errors.
@@ -143,11 +192,51 @@ class AnthropicLLM:
             for b in response.content
             if b.type == "tool_use"
         )
+        if response.stop_reason == "max_tokens":
+            # Cut off mid-output: a tool call's input may be incomplete, so never run it.
+            calls = ()
         usage = {
             "input_tokens": response.usage.input_tokens,
             "output_tokens": response.usage.output_tokens,
         }
-        return LLMResponse(content=text, tool_calls=calls, usage=usage)
+        return LLMResponse(
+            content=text, tool_calls=calls, usage=usage, provider_content=tuple(response.content)
+        )
+
+
+def _openai_turns(messages: Sequence[Message]) -> list[ChatCompletionMessageParam]:
+    turns: list[ChatCompletionMessageParam] = []
+    for m in messages:
+        match m.role:
+            case "system":
+                turns.append({"role": "system", "content": m.content})
+            case "user":
+                turns.append({"role": "user", "content": m.content})
+            case "assistant" if m.tool_calls:
+                turns.append(
+                    {
+                        "role": "assistant",
+                        "content": m.content or None,
+                        "tool_calls": [
+                            {
+                                "id": c.id,
+                                "type": "function",
+                                "function": {
+                                    "name": c.name,
+                                    "arguments": json.dumps(c.arguments, ensure_ascii=False),
+                                },
+                            }
+                            for c in m.tool_calls
+                        ],
+                    }
+                )
+            case "assistant":
+                turns.append({"role": "assistant", "content": m.content})
+            case "tool":
+                turns.append(
+                    {"role": "tool", "tool_call_id": _tool_call_id(m), "content": m.content}
+                )
+    return turns
 
 
 class OpenAILLM:
@@ -158,16 +247,6 @@ class OpenAILLM:
     async def complete(
         self, messages: list[Message], tools: list[ToolSpec] | None = None
     ) -> LLMResponse:
-        _reject_tool_turns(messages)
-        turns: list[ChatCompletionMessageParam] = []
-        for m in messages:
-            match m.role:
-                case "system":
-                    turns.append({"role": "system", "content": m.content})
-                case "user":
-                    turns.append({"role": "user", "content": m.content})
-                case "assistant":
-                    turns.append({"role": "assistant", "content": m.content})
         tool_params: list[ChatCompletionFunctionToolParam] = [
             {
                 "type": "function",
@@ -181,7 +260,9 @@ class OpenAILLM:
         ]
         try:
             response = await self._client.chat.completions.create(
-                model=self._model, messages=turns, tools=tool_params or openai.omit
+                model=self._model,
+                messages=_openai_turns(messages),
+                tools=tool_params or openai.omit,
             )
         except openai.RateLimitError as e:
             raise LLMUnavailableError(str(e), _retry_after(e.response.headers)) from e

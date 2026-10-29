@@ -1,4 +1,4 @@
-"""FastAPI entrypoint: /health and /chat (#5)."""
+"""FastAPI entrypoint: /health and /chat (#5; tools and session memory #7)."""
 
 import logging
 from functools import lru_cache
@@ -10,6 +10,8 @@ from fastapi.responses import JSONResponse
 
 from shop_ops_agent import __version__
 from shop_ops_agent.agent.chat import ChatService
+from shop_ops_agent.agent.memory import SessionMemory
+from shop_ops_agent.agent.tools import Catalog, build_registry
 from shop_ops_agent.api.schemas import (
     ChatRequest,
     ChatResponse,
@@ -43,7 +45,11 @@ def get_chat_service() -> ChatService:
     llm = create_llm(settings)
     collection = open_collection(Path(settings.chroma_path), settings.embedding_model)
     embedder = SentenceTransformerEmbedder(settings.embedding_model)
-    return ChatService(Retriever(collection, embedder), llm)
+    retriever = Retriever(collection, embedder)
+    registry = build_registry(Catalog(Path(settings.catalog_path)), retriever)
+    # /chat has no authentication yet, so every caller is a customer: operator-only tools
+    # (supplier prices) are never offered or executed here.
+    return ChatService(retriever, llm, registry, SessionMemory(), audience="customer")
 
 
 # Clients get a generic message; the real cause (which may name env vars or paths) is
@@ -75,8 +81,9 @@ async def health() -> HealthResponse:
 async def chat(
     request: ChatRequest, service: Annotated[ChatService, Depends(get_chat_service)]
 ) -> ChatResponse:
-    result = await service.answer(request.message)
+    result = await service.answer(request.session_id, request.message)
     return ChatResponse(
+        session_id=result.session_id,
         answer=result.answer,
         citations=[Citation(sku=h.sku, name=h.name) for h in result.citations],
         tool_calls=[ToolCallOut(name=c.name, arguments=c.arguments) for c in result.tool_calls],
