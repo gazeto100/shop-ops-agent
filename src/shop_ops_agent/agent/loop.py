@@ -42,6 +42,8 @@ class AgentLoop:
         audience: Audience,
         max_iterations: int = MAX_ITERATIONS,
     ) -> None:
+        if max_iterations < 1:
+            raise ValueError("max_iterations must be at least 1")
         self._llm = llm
         self._registry = registry
         self._audience = audience
@@ -51,12 +53,11 @@ class AgentLoop:
         conversation = list(messages)  # this turn's working copy; only ever appended to
         tools = self._registry.specs(self._audience) or None
         exchanges: list[ToolExchange] = []
-        for iteration in range(1, self._max_iterations + 1):
+        # Every call but the last may run tools and feed the results back...
+        for _ in range(self._max_iterations - 1):
             response = await self._llm.complete(conversation, tools)
             if not response.tool_calls:
                 return LoopResult(final=response, exchanges=tuple(exchanges))
-            if iteration == self._max_iterations:
-                break  # don't run tools whose results no LLM call would ever read
             conversation.append(response.as_message())
             for call in response.tool_calls:
                 exchange = await self._execute(call)
@@ -64,6 +65,11 @@ class AgentLoop:
                 conversation.append(
                     Message(role="tool", content=exchange.result_json, tool_call_id=call.id)
                 )
+        # ...the last one must answer: tools it asks for are never run, since no further
+        # LLM call would read their results.
+        response = await self._llm.complete(conversation, tools)
+        if not response.tool_calls:
+            return LoopResult(final=response, exchanges=tuple(exchanges))
         log.warning("agent loop stopped after %d iterations", self._max_iterations)
         return LoopResult(final=None, exchanges=tuple(exchanges))
 

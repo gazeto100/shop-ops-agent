@@ -176,6 +176,10 @@ async def test_price_from_the_tool_result_reaches_the_user() -> None:
         "[BOIL-80-A: Бойлер] струва 199.00 EUR.",  # not what the tool said
         "[BOIL-80-A: Бойлер] струва около 370 лв.",  # rounded
         "[BOIL-80-A: Бойлер] — налични 9 бр.",  # wrong stock
+        "[BOIL-80-A: Бойлер] струва 4 EUR.",  # review: equals the STOCK count, not a price
+        "[BOIL-80-A: Бойлер] струва 189.00 лв.",  # review: the EUR amount labelled BGN
+        "[BOIL-80-A: Бойлер] — налични 189 бр.",  # a price used as a stock count
+        "[BOIL-80-A: Бойлер] струва $189.",  # no tool returns dollars
     ],
 )
 async def test_figures_not_in_the_tool_result_are_blocked(answer: str) -> None:
@@ -314,10 +318,10 @@ def test_parse_figure_handles_bulgarian_and_english_separators(text: str, value:
 async def test_previous_text_turns_are_in_the_next_prompt() -> None:
     memory = SessionMemory()
     first = after_checking_boiler("[BOIL-80-A: Бойлер] струва 189.00 EUR.")
-    await service(first, memory=memory).answer("s1", "Колко струва бойлерът?")
+    turn1 = await service(first, memory=memory).answer(None, "Колко струва бойлерът?")
     second = FakeLLM()
 
-    await service(second, memory=memory).answer("s1", "А гаранцията?")
+    await service(second, memory=memory).answer(turn1.session_id, "А гаранцията?")
 
     messages = second.calls[0][0]
     assert messages[1:3] == [
@@ -341,9 +345,40 @@ async def test_sessions_are_isolated() -> None:
 async def test_guarded_reply_is_what_memory_keeps() -> None:
     memory = SessionMemory()
 
-    await service(answering("струва 1 EUR"), memory=memory).answer("s1", "Колко струва?")
+    result = await service(answering("струва 1 EUR"), memory=memory).answer(None, "Колко?")
 
-    assert memory.history("s1")[1].content == PRICE_UNAVAILABLE_REPLY["bg"]
+    assert memory.history(result.session_id)[1].content == PRICE_UNAVAILABLE_REPLY["bg"]
+
+
+async def test_follow_up_may_cite_a_product_from_an_earlier_answer() -> None:
+    # Review finding: the follow-up's retrieval no longer returns the boiler, but the
+    # previous (verified) answer cited it, so citing it again is not an invented product.
+    memory = SessionMemory()
+    turn1 = await service(
+        answering("Имаме [BOIL-80-A: Бойлер Tesy 80 л вертикален]."), memory=memory
+    ).answer(None, "Имате ли бойлер?")
+
+    follow_up = await service(
+        answering("[BOIL-80-A: Бойлер Tesy 80 л вертикален] е с гаранция 60 месеца."),
+        hits=(),
+        memory=memory,
+    ).answer(turn1.session_id, "А гаранцията му?")
+
+    assert follow_up.guardrail is None
+    assert follow_up.citations == (CitedProduct("BOIL-80-A", "Бойлер Tesy 80 л вертикален"),)
+
+
+async def test_products_from_another_session_are_not_known() -> None:
+    memory = SessionMemory()
+    await service(
+        answering("Имаме [BOIL-80-A: Бойлер Tesy 80 л вертикален]."), memory=memory
+    ).answer(None, "Имате ли бойлер?")
+
+    other = await service(
+        answering("[BOIL-80-A: Бойлер Tesy 80 л вертикален]."), hits=(), memory=memory
+    ).answer(None, "Бойлер?")
+
+    assert other.guardrail == "unverified_product"
 
 
 # --- Refusals / metadata ----------------------------------------------------------------

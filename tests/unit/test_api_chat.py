@@ -64,28 +64,47 @@ def test_chat_runs_tools_and_reports_them() -> None:
     ]
 
 
-def test_session_id_carries_memory_between_requests() -> None:
+def test_returned_session_id_carries_memory_between_requests() -> None:
     llm = FakeLLM([LLMResponse(content="Здравейте!")])
     service = chat_service(llm)
     app.dependency_overrides[get_chat_service] = lambda: service
     try:
         client = TestClient(app)
-        client.post("/chat", json={"session_id": "s1", "message": "Здравей"})
-        client.post("/chat", json={"session_id": "s1", "message": "Как си?"})
-        client.post("/chat", json={"session_id": "s2", "message": "Здравей"})
+        session = client.post("/chat", json={"message": "Здравей"}).json()["session_id"]
+        again = client.post("/chat", json={"session_id": session, "message": "Как си?"})
+        other = client.post("/chat", json={"message": "Здравей"})
     finally:
         app.dependency_overrides.clear()
 
+    assert again.json()["session_id"] == session
+    assert other.json()["session_id"] != session
     second, third = llm.calls[1][0], llm.calls[2][0]
-    assert Message(role="user", content="Здравей") in second  # s1 remembered
-    assert len(third) == 2  # s2 starts fresh: system + question
+    assert Message(role="user", content="Здравей") in second  # the session remembered
+    assert len(third) == 2  # a new session starts fresh: system + question
 
 
-def test_chat_returns_answer_citations_and_tool_calls(client: TestClient) -> None:
-    r = client.post("/chat", json={"session_id": "demo", "message": "Имате ли бойлер?"})
+def test_a_guessed_session_id_does_not_reveal_another_conversation() -> None:
+    llm = FakeLLM([LLMResponse(content="Добре, Иван.")])
+    service = chat_service(llm)
+    app.dependency_overrides[get_chat_service] = lambda: service
+    try:
+        client = TestClient(app)
+        client.post("/chat", json={"session_id": "demo", "message": "Аз съм Иван"})
+        r = client.post("/chat", json={"session_id": "demo", "message": "Кой съм аз?"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert r.json()["session_id"] != "demo"  # client-chosen ids are never adopted
+    assert all("Иван" not in m.content for m in llm.calls[1][0][1:-1])
+
+
+def test_chat_returns_session_answer_citations_and_tool_calls(client: TestClient) -> None:
+    r = client.post("/chat", json={"message": "Имате ли бойлер?"})
 
     assert r.status_code == 200
-    assert r.json() == {
+    body = r.json()
+    assert len(body.pop("session_id")) >= 20
+    assert body == {
         "answer": "Имаме [BOIL-80-A: Бойлер Tesy 80 л вертикален].",
         "citations": [{"sku": "BOIL-80-A", "name": "Бойлер Tesy 80 л вертикален"}],
         "tool_calls": [],
@@ -97,7 +116,8 @@ def test_chat_returns_answer_citations_and_tool_calls(client: TestClient) -> Non
     [
         {"session_id": "demo", "message": ""},
         {"session_id": "", "message": "Здравей"},
-        {"message": "Здравей"},
+        {"session_id": "x" * 129, "message": "Здравей"},
+        {"session_id": "demo"},
     ],
 )
 def test_invalid_request_is_rejected(client: TestClient, body: dict[str, str]) -> None:

@@ -3,6 +3,7 @@
 from decimal import Decimal
 from typing import Any
 
+import pytest
 from pydantic import BaseModel
 
 from shop_ops_agent.agent.loop import MAX_ITERATIONS, AgentLoop
@@ -163,3 +164,33 @@ async def test_audience_decides_which_tool_specs_are_offered() -> None:
     customer_tools, operator_tools = (call[1] or [] for call in llm.calls)
     assert [t["name"] for t in customer_tools] == ["check_stock_and_price"]
     assert [t["name"] for t in operator_tools] == ["check_stock_and_price", "secret"]
+
+
+async def test_a_one_iteration_budget_never_runs_tools() -> None:
+    call = ToolCall(id="c1", name="check_stock_and_price", arguments={"sku": "X1"})
+    llm = FakeLLM([LLMResponse(content="", tool_calls=(call,))])
+    spy = SpyStockTool()
+
+    outcome = await AgentLoop(llm, registry_with(spy), "customer", max_iterations=1).run(QUESTION)
+
+    assert outcome.final is None
+    assert len(llm.calls) == 1
+    assert spy.calls == []
+
+
+def test_iteration_budget_must_be_positive() -> None:
+    with pytest.raises(ValueError, match="at least 1"):
+        AgentLoop(FakeLLM(), registry_with(SpyStockTool()), "customer", max_iterations=0)
+
+
+async def test_an_answer_on_the_last_allowed_call_is_returned() -> None:
+    call = ToolCall(id="c1", name="check_stock_and_price", arguments={"sku": "X1"})
+    llm = FakeLLM([LLMResponse(content="", tool_calls=(call,)), LLMResponse(content="Готово.")])
+
+    outcome = await AgentLoop(llm, registry_with(SpyStockTool()), "customer", max_iterations=2).run(
+        QUESTION
+    )
+
+    assert outcome.final is not None
+    assert outcome.final.content == "Готово."
+    assert len(outcome.exchanges) == 1

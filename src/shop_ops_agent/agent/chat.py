@@ -10,7 +10,7 @@ import json
 import logging
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Literal
 
@@ -43,15 +43,26 @@ _ENGLISH_WORD = re.compile(
 )
 # "[BOIL-80-A: …]" and the "[sku: BOIL-80-A: …]" form models copy from instructions.
 _CITATION = re.compile(r"\[\s*(?:(?i:sku)\s*:\s*)?([A-Za-z0-9][A-Za-z0-9._/-]*)\s*:")
-# A money amount or a stock count in the answer. Each one must be backed by a figure in
-# this turn's tool results.
-_PRICE_OR_STOCK = re.compile(
-    r"(?:€|\$|\beur\b|\bbgn\b|\bлв\b\.?)\s*\d[\d\s.,]*"
-    r"|\d[\d\s.,]*\s*(?:€|\$|\beur\b|\bbgn\b|евро|\bлв\b|лева|стотинки|\bcents?\b)"
-    r"|\d+\s*(?:\bбр\b|броя|\bpcs\b|\bpieces\b|\bunits?\b|\bin stock\b|на склад)",
-    re.IGNORECASE,
+# What a figure in a tool result means, by field name. Only these back an answer.
+type FigureKind = Literal["eur", "bgn", "stock"]
+_FIGURE_FIELDS: dict[str, FigureKind] = {
+    "price_eur": "eur",
+    "price_bgn": "bgn",
+    "supplier_price_bgn": "bgn",
+    "stock_qty": "stock",
+}
+_NUM = r"(\d(?:[\d\s.,]*\d)?)"
+# Price/stock mentions in the answer, by kind. A mention must equal a figure of the SAME
+# kind from this turn's tool results: "4 EUR" is not backed by a stock count of 4, and
+# "189.00 лв" is not backed by a EUR price of 189.00. Kind None is never backed: no tool
+# returns dollars or cent amounts.
+_MENTION_PATTERNS: tuple[tuple[FigureKind | None, str], ...] = (
+    ("eur", rf"(?:€|\beur\b)\s*{_NUM}|{_NUM}\s*(?:€|\beur\b|евро)"),
+    ("bgn", rf"(?:\bbgn\b|\bлв\b\.?)\s*{_NUM}|{_NUM}\s*(?:\bbgn\b|\bлв\b|лева)"),
+    ("stock", rf"{_NUM}\s*(?:\bбр\b|броя|\bpcs\b|\bpieces\b|\bunits?\b|\bin stock\b|на склад)"),
+    (None, rf"\$\s*{_NUM}|{_NUM}\s*(?:\$|стотинки|\bcents?\b)"),
 )
-_NUMBER = re.compile(r"\d[\d\s.,]*\d|\d")
+_MENTIONS = tuple((kind, re.compile(p, re.IGNORECASE)) for kind, p in _MENTION_PATTERNS)
 _NUMERIC_STRING = re.compile(r"-?\d+(?:\.\d+)?")
 
 type Guardrail = Literal["price_or_stock", "unverified_product", "max_iterations"]
@@ -68,6 +79,7 @@ class ChatResult:
     answer: str
     citations: tuple[CitedProduct, ...]
     tool_calls: tuple[ToolCall, ...]
+    session_id: str = ""  # filled in by ChatService.answer: pass it with the next message
     prompt_version: str = PROMPT_VERSION
     # Set when the model's answer was replaced by a safe reply, and why.
     guardrail: Guardrail | None = None
@@ -76,10 +88,13 @@ class ChatResult:
 
 @dataclass
 class Evidence:
-    """What this turn's tool results establish: products (code -> name) and figures."""
+    """What this turn's tool results establish: products (code -> name) and figures by
+    kind (EUR price, BGN price, stock count)."""
 
     products: dict[str, str] = field(default_factory=dict)
-    figures: set[Decimal] = field(default_factory=set)
+    figures: dict[FigureKind, set[Decimal]] = field(
+        default_factory=lambda: {"eur": set(), "bgn": set(), "stock": set()}
+    )
 
     @classmethod
     def from_exchanges(cls, exchanges: tuple[ToolExchange, ...]) -> "Evidence":
@@ -93,17 +108,23 @@ class Evidence:
             sku, name = node.get("sku"), node.get("name")
             if isinstance(sku, str) and isinstance(name, str):
                 self.products[sku] = name
-            for value in node.values():
+            for key, value in node.items():
+                if (kind := _FIGURE_FIELDS.get(key)) and (figure := _as_figure(value)) is not None:
+                    self.figures[kind].add(figure)
                 self._collect(value)
         elif isinstance(node, list):
             for value in node:
                 self._collect(value)
-        elif isinstance(node, bool):
-            pass  # True/False are not figures (and bool is a subclass of int)
-        elif isinstance(node, int | float):
-            self.figures.add(Decimal(str(node)))
-        elif isinstance(node, str) and _NUMERIC_STRING.fullmatch(node):
-            self.figures.add(Decimal(node))  # money is serialised as "189.00"
+
+
+def _as_figure(value: object) -> Decimal | None:
+    if isinstance(value, bool):
+        return None  # bool is a subclass of int; True is not the figure 1
+    if isinstance(value, int):
+        return Decimal(value)
+    if isinstance(value, str) and _NUMERIC_STRING.fullmatch(value):
+        return Decimal(value)  # money is serialised as "189.00"
+    return None
 
 
 def detect_language(text: str) -> Language:
@@ -131,12 +152,14 @@ def parse_figure(text: str) -> Decimal:
 
 
 def unbacked_figures(answer: str, evidence: Evidence) -> list[str]:
-    """Price/stock mentions in the answer whose number no tool result contains."""
-    return [
-        m.group().strip()
-        for m in _PRICE_OR_STOCK.finditer(answer)
-        if any(parse_figure(n) not in evidence.figures for n in _NUMBER.findall(m.group()))
-    ]
+    """Price/stock mentions in the answer that no tool result of the same kind backs."""
+    unbacked = []
+    for kind, pattern in _MENTIONS:
+        for m in pattern.finditer(answer):
+            number = next(g for g in m.groups() if g)
+            if kind is None or parse_figure(number) not in evidence.figures[kind]:
+                unbacked.append(m.group().strip())
+    return unbacked
 
 
 class ChatService:
@@ -156,11 +179,16 @@ class ChatService:
         self._loop = AgentLoop(llm, registry, audience, max_iterations)
         self._k = k
 
-    async def answer(self, session_id: str, question: str) -> ChatResult:
+    async def answer(self, session_id: str | None, question: str) -> ChatResult:
+        """`session_id` is the id a previous answer returned, or None to start a session.
+        An id this service didn't issue starts a new session too."""
+        session_id = self._memory.resolve(session_id)
         result = await self._answer(session_id, question)
-        # Remember what the user actually saw, guarded replies included.
-        self._memory.add_exchange(session_id, question, result.answer)
-        return result
+        # Remember what the user actually saw, guarded replies included, and which
+        # products it verifiably cited.
+        cited = {c.sku: c.name for c in result.citations}
+        self._memory.add_exchange(session_id, question, result.answer, cited)
+        return replace(result, session_id=session_id)
 
     async def _answer(self, session_id: str, question: str) -> ChatResult:
         language = detect_language(question)
@@ -195,7 +223,13 @@ class ChatService:
                 tool_calls=calls,
                 guardrail="price_or_stock",
             )
-        known: Mapping[str, str] = {hit.sku: hit.name for hit in hits} | evidence.products
+        # Verified products: cited earlier in this session, retrieved now, or returned by a
+        # tool now. Earlier citations make follow-ups ("and its warranty?") work.
+        known: Mapping[str, str] = (
+            self._memory.cited_products(session_id)
+            | {hit.sku: hit.name for hit in hits}
+            | evidence.products
+        )
         unverified = tuple(s for s in cited_skus(answer) if s not in known)
         if unverified:
             log.warning("guardrail unverified_product %s (prompt %s)", unverified, PROMPT_VERSION)

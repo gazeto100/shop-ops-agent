@@ -9,9 +9,10 @@ lint:
 	uv run ruff format --check .
 	uv run mypy
 
-# Tool logic must stay at 100% line+branch coverage (#6).
+# Tool logic (#6) and the agent loop + memory (#7) stay at 100% line+branch coverage.
 test:
-	uv run pytest tests/unit -q --cov=shop_ops_agent.agent.tools --cov-branch \
+	uv run pytest tests/unit -q --cov=shop_ops_agent.agent.tools \
+		--cov=shop_ops_agent.agent.loop --cov=shop_ops_agent.agent.memory --cov-branch \
 		--cov-report=term-missing:skip-covered --cov-fail-under=100
 
 test-integration:

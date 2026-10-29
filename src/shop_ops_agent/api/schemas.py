@@ -11,7 +11,9 @@ class HealthResponse(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    session_id: str = Field(min_length=1, max_length=128)  # keys the session memory
+    # Omit on the first message; then send back the session_id the response returned.
+    # Ids are issued by the server: an unknown one simply starts a new session.
+    session_id: str | None = Field(default=None, min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=4000)
 
 
@@ -26,6 +28,7 @@ class ToolCallOut(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    session_id: str
     answer: str
     citations: list[Citation]
     tool_calls: list[ToolCallOut]

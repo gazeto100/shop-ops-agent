@@ -60,3 +60,42 @@ def test_least_recently_used_session_is_dropped_beyond_the_cap() -> None:
     assert memory.history("busy") == []
     assert memory.history("old") != []
     assert memory.history("new") != []
+
+
+def test_new_sessions_get_unguessable_server_issued_ids() -> None:
+    memory = SessionMemory()
+
+    first, second = memory.resolve(None), memory.resolve(None)
+
+    assert first != second
+    assert len(first) >= 20  # secrets.token_urlsafe(16): 128 random bits
+
+
+def test_a_client_chosen_id_is_never_adopted() -> None:
+    memory = SessionMemory()
+    memory.add_exchange(memory.resolve(None), "Аз съм Иван", "Здравейте, Иван!")
+
+    issued = memory.resolve("demo")
+
+    assert issued != "demo"
+    assert memory.history(issued) == []
+
+
+def test_an_issued_id_that_is_still_held_is_kept() -> None:
+    memory = SessionMemory()
+    session = memory.resolve(None)
+    memory.add_exchange(session, "q", "a")
+
+    assert memory.resolve(session) == session
+
+
+def test_cited_products_of_remembered_answers_are_known() -> None:
+    memory = SessionMemory(max_messages=4)
+    memory.add_exchange("s", "q1", "a1", {"BOIL-80-A": "Бойлер"})
+    memory.add_exchange("s", "q2", "a2", {"KET-17-S": "Кана"})
+    assert memory.cited_products("s") == {"BOIL-80-A": "Бойлер", "KET-17-S": "Кана"}
+
+    memory.add_exchange("s", "q3", "a3")  # BOIL-80-A's answer leaves the window
+
+    assert memory.cited_products("s") == {"KET-17-S": "Кана"}
+    assert memory.cited_products("unknown") == {}

@@ -83,6 +83,7 @@ async def chat(
 ) -> ChatResponse:
     result = await service.answer(request.session_id, request.message)
     return ChatResponse(
+        session_id=result.session_id,
         answer=result.answer,
         citations=[Citation(sku=h.sku, name=h.name) for h in result.citations],
         tool_calls=[ToolCallOut(name=c.name, arguments=c.arguments) for c in result.tool_calls],

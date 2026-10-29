@@ -90,13 +90,18 @@ model in `tests/integration/` (CI caches the model); unit tests use fakes.
 - **Verbatim results:** the tool message content is exactly `result.model_dump_json()`.
 - **Thinking replay:** an assistant turn keeps the provider's raw content blocks and Claude
   gets them back unchanged within the turn, which is append-only.
-- **Memory = text turns only** (question + the answer shown, guarded replies included),
-  last 10 messages per session, LRU-capped at 10,000 sessions. Tool traffic and thinking
+- **Memory = text turns only** (question + the answer shown, guarded replies included,
+  plus the products that answer verifiably cited, so follow-ups may cite them again),
+  last 10 messages per session, LRU-capped at 10,000 sessions. **Session ids are issued
+  by the server** (`secrets.token_urlsafe`); an unknown or client-chosen id (e.g. "demo")
+  starts a new session, so nobody can read another conversation by guessing an id. Tool traffic and thinking
   blocks never enter memory: a sliding window changes the history every turn, which would
   invalidate replayed thinking blocks, and stale prices would sit in context. Upgrade path:
   Redis list per session (`RPUSH` + `LTRIM -10 -1` + `EXPIRE`), shared across workers.
-- **Guardrails use this turn's tool results as evidence:** every price/stock figure in the
-  answer must equal a number in a tool result (`189` = `189.00`; `370` for `369.64` is
-  blocked), and a cited product must come from retrieval or a tool.
+- **Guardrails use this turn's tool results as evidence, by kind:** a EUR amount must equal a
+  `price_eur`, a BGN amount a `price_bgn`, a stock count a `stock_qty` (`189` = `189.00`;
+  a rounded `370 лв`, `4 EUR` where 4 is the stock, or the EUR price labelled `лв` are all
+  blocked; `$` and cent amounts are never backed). A cited product must come from
+  retrieval, a tool, or an earlier verified answer in the same session.
 - **/chat is `customer`-only** until operators are authenticated; the supplier tool is
   neither offered nor executable there.

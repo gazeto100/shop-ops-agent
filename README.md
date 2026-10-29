@@ -30,18 +30,19 @@ make setup
 make ingest
 make serve
 curl -X POST localhost:8000/chat -H 'content-type: application/json' \
-  -d '{"session_id":"demo","message":"Има ли наличен бойлер 80 литра и каква е цената?"}'
+  -d '{"message":"Има ли наличен бойлер 80 литра и каква е цената?"}'
 ```
 
-`/chat` returns `{"answer": "...", "citations": [{"sku": "...", "name": "..."}], "tool_calls": [{"name": "...", "arguments": {...}}]}`.
+`/chat` returns `{"session_id": "...", "answer": "...", "citations": [{"sku": "...", "name": "..."}], "tool_calls": [{"name": "...", "arguments": {...}}]}`.
 The answer is grounded in the retrieved catalog excerpt and the agent's tools
 (`search_products`, `check_stock_and_price`; the supplier-price tool is operator-only and never
 offered on `/chat`), and written in the user's language (Bulgarian unless the message is in
 English). The agent runs up to 5 model calls per message, then stops with a clear message.
 Prices and stock come only from `check_stock_and_price` in the same turn: an answer stating a
 figure no tool returned, or citing a product neither search nor a tool returned, is replaced
-by a safe reply. `session_id` keeps the last 10 messages (questions and answers) in memory
-for follow-ups; memory is per process and lost on restart. A misconfigured service or an
+by a safe reply. The response's `session_id` is issued by the server: send it back with the
+next message for follow-ups (the last 10 messages are remembered, per process, lost on
+restart). An id the server didn't issue just starts a new session. A misconfigured service or an
 unavailable LLM provider returns `503` (with `Retry-After`). `LLM_MODEL` may be left empty to
 use the provider's default model (see `.env.example`).
 
@@ -50,7 +51,7 @@ use the provider's default model (see `.env.example`).
 > and send it as-is:
 >
 > ```bash
-> printf '%s' '{"session_id":"demo","message":"Има ли наличен бойлер 80 литра?"}' > chat.json
+> printf '%s' '{"message":"Има ли наличен бойлер 80 литра?"}' > chat.json
 > curl -X POST localhost:8000/chat -H 'content-type: application/json' --data-binary @chat.json
 > ```
 

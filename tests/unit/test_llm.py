@@ -149,6 +149,22 @@ async def test_anthropic_reads_blocks_by_type_skipping_thinking() -> None:
     assert response.usage == {"input_tokens": 12, "output_tokens": 7}
 
 
+async def test_anthropic_max_tokens_cut_off_never_yields_a_tool_call() -> None:
+    # A response cut off by max_tokens may carry a truncated tool_use input.
+    llm, _ = anthropic_stub(
+        stop_reason="max_tokens",
+        content=[
+            {"type": "text", "text": "Проверявам"},
+            {"type": "tool_use", "id": "tu_1", "name": "check_stock_and_price", "input": {}},
+        ],
+    )
+
+    response = await llm.complete(CONVERSATION, TOOLS)
+
+    assert response.tool_calls == ()
+    assert response.content == "Проверявам"
+
+
 async def test_anthropic_refusal_raises_before_content_is_read() -> None:
     llm, _ = anthropic_stub(stop_reason="refusal", content=[])
 

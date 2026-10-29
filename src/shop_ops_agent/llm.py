@@ -192,6 +192,9 @@ class AnthropicLLM:
             for b in response.content
             if b.type == "tool_use"
         )
+        if response.stop_reason == "max_tokens":
+            # Cut off mid-output: a tool call's input may be incomplete, so never run it.
+            calls = ()
         usage = {
             "input_tokens": response.usage.input_tokens,
             "output_tokens": response.usage.output_tokens,
