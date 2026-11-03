@@ -51,22 +51,21 @@ class EvalReport:
         scores = [r.score for r in self.results if r.score is not None]
         recalls = [s.tool_recall for s in scores if s.tool_recall is not None]
         fact_rates = [s.facts_hit_rate for s in scores if s.facts_hit_rate is not None]
-        must_cite = [r for r in self.results if r.case.must_cite and r.score is not None]
+        must_cite = [r.score for r in self.results if r.case.must_cite and r.score is not None]
         return {
             "cases": len(self.results),
             "passed": sum(r.passed for r in self.results),
             "errors": sum(r.error is not None for r in self.results),
-            "mean_tool_recall": round(fmean(recalls), 3) if recalls else None,
-            "mean_facts_hit_rate": round(fmean(fact_rates), 3) if fact_rates else None,
+            "mean_tool_recall": _mean(recalls),
+            "mean_facts_hit_rate": _mean(fact_rates),
             "must_not_contain_violations": sum(len(s.violations) for s in scores),
-            "citation_rate": (
-                round(
-                    sum(r.score.citation_present for r in must_cite if r.score) / len(must_cite), 3
-                )
-                if must_cite
-                else None
-            ),
+            "citation_rate": _mean([float(s.citation_present) for s in must_cite]),
+            "language_ok_rate": _mean([float(s.language_ok) for s in scores]),
         }
+
+
+def _mean(values: Sequence[float]) -> float | None:
+    return round(fmean(values), 3) if values else None
 
 
 async def run_golden(
@@ -102,7 +101,10 @@ def _pct(value: float | None) -> str:
 
 
 def render_table(report: EvalReport) -> str:
-    header = f"{'id':<6} {'category':<12} {'tools':>5} {'facts':>5} {'viol':>4} {'cite':>4}  result"
+    header = (
+        f"{'id':<6} {'category':<12} {'tools':>5} {'facts':>5} {'viol':>4} {'cite':>4} "
+        f"{'lang':>4}  result"
+    )
     lines = [
         f"Golden-set eval {report.run_date} - model {report.model}, prompt {report.prompt_version}",
         header,
@@ -120,9 +122,11 @@ def render_table(report: EvalReport) -> str:
         notes += [f"VIOLATES {list(s.violations)}"] if s.violations else []
         notes += [f"guardrail {r.guardrail}"] if r.guardrail else []
         notes += [f"unbacked {list(r.unbacked_figures)}"] if r.unbacked_figures else []
+        notes += [f"not in {r.case.lang}"] if not s.language_ok else []
+        lang = "ok" if s.language_ok else "no"
         lines.append(
             f"{r.case.id:<6} {r.case.category:<12} {_pct(s.tool_recall)} "
-            f"{_pct(s.facts_hit_rate)} {len(s.violations):>4} {cite:>4}  "
+            f"{_pct(s.facts_hit_rate)} {len(s.violations):>4} {cite:>4} {lang:>4}  "
             f"{'PASS' if r.passed else 'FAIL'}  {'; '.join(notes)}".rstrip()
         )
     summary = report.summary()
@@ -132,15 +136,21 @@ def render_table(report: EvalReport) -> str:
         f"tool recall {_pct(summary['mean_tool_recall']).strip()}, "
         f"facts {_pct(summary['mean_facts_hit_rate']).strip()}, "
         f"violations {summary['must_not_contain_violations']}, "
-        f"citations {_pct(summary['citation_rate']).strip()}",
+        f"citations {_pct(summary['citation_rate']).strip()}, "
+        f"language {_pct(summary['language_ok_rate']).strip()}",
     ]
     return "\n".join(lines)
 
 
 def write_results(report: EvalReport, out_dir: Path) -> Path:
-    """Write `<out_dir>/results-<YYYY-MM-DD>.json` (a later run that day replaces it)."""
+    """Write `<out_dir>/results-<YYYY-MM-DD>.json`. Later runs that day get `-2`, `-3`, …
+    instead of replacing it, so a before/after comparison (e.g. a prompt change) keeps
+    both runs."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"results-{report.run_date.isoformat()}.json"
+    stem = f"results-{report.run_date.isoformat()}"
+    path, n = out_dir / f"{stem}.json", 2
+    while path.exists():
+        path, n = out_dir / f"{stem}-{n}.json", n + 1
     payload = {
         "date": report.run_date.isoformat(),
         "model": report.model,

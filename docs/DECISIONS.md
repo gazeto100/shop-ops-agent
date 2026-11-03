@@ -111,8 +111,11 @@ model in `tests/integration/` (CI caches the model); unit tests use fakes.
   not penalised). `[]` = no tool may be called; `null` = not scored, because the retrieved
   catalog excerpt often makes `search_products` unnecessary and requiring it would punish
   reasonable behaviour. Existing cases were adjusted to "required tools only".
-- **Facts and forbidden strings are case-insensitive substring checks**: deterministic and
-  cheap. Semantic faithfulness is the LLM-as-judge in #9.
+- **Facts and forbidden strings are case-insensitive string checks** (deterministic, cheap)
+  where numbers match only as whole numbers: plain substrings flagged honest answers
+  ("0 EUR" inside "24.90 EUR") and let "36" pass on "360". The answer language (`lang`)
+  is scored too, by word counts that ignore citations, units and brands. Semantic
+  faithfulness is the LLM-as-judge in #9.
 - **The eval runs the real `ChatService`, guardrails included**, so it scores what a user
   would see, against a fresh index of the sample catalog the cases are written for.
 - **Results (`evals/results-<date>.json`) are gitignored run artifacts**; #9 can publish

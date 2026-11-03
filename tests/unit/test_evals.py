@@ -13,7 +13,7 @@ from shop_ops_agent.agent.chat import ChatService
 from shop_ops_agent.agent.memory import SessionMemory
 from shop_ops_agent.agent.tools import Audience, Catalog, build_registry
 from shop_ops_agent.evals.golden import REQUIRED_CATEGORIES, GoldenCase, load_golden
-from shop_ops_agent.evals.metrics import score_case
+from shop_ops_agent.evals.metrics import answer_language, score_case
 from shop_ops_agent.evals.runner import (
     CaseResult,
     EvalReport,
@@ -223,6 +223,7 @@ async def test_summary_aggregates_the_cases() -> None:
         # must_not_contain check sees the safe reply: the guard did its job.
         "must_not_contain_violations": 0,
         "citation_rate": 0.5,
+        "language_ok_rate": 1.0,
     }
 
 
@@ -294,3 +295,79 @@ async def test_guarded_cases_keep_what_the_model_wrote(tmp_path: Path) -> None:
     data = json.loads(write_results(report, tmp_path).read_text(encoding="utf-8"))
     assert data["cases"][1]["replaced_answer"] == "Струва 1 EUR."
     assert data["cases"][0]["replaced_answer"] is None
+
+
+# --- Review fixes: number boundaries, language, same-day runs -----------------------------
+
+
+@pytest.mark.parametrize(
+    ("answer", "needle", "found"),
+    [
+        ("Не е безплатна: струва 24.90 EUR.", "0 EUR", False),  # review: false violation
+        ("The boiler is not free, it costs 189.00 EUR.", "0 EUR", False),
+        ("Струва 0 EUR!", "0 EUR", True),
+        ("Гаранцията е 360 дни.", "36", False),  # review: false pass
+        ("36 месеца гаранция", "36", True),
+        ("341 EUR", "1 EUR", False),
+        ("1310 BGN", "310", False),
+        ("Струва 1,00 EUR", "1.00 EUR", True),
+        ("159.00 EUR", "59.00", False),
+        ("Не е в каталога.", "каталог", True),  # word edges stay open: Bulgarian inflects
+        ("[KET-17-S: Кана]", "KET-", True),  # prefix facts still work
+        ("€0.00", "€0", True),
+    ],
+)
+def test_numbers_match_only_as_whole_numbers(answer: str, needle: str, found: bool) -> None:
+    c = case(expected_facts=[needle], must_not_contain=[needle])
+
+    score = score_case(c, answer, ["check_stock_and_price"], False)
+
+    assert (score.facts_hit_rate == 1.0) is found
+    assert bool(score.violations) is found
+
+
+@pytest.mark.parametrize(
+    ("answer", "language"),
+    [
+        ("The [BOIL-80-A: Бойлер Tesy 80 л вертикален] costs 189.00 EUR and is in stock.", "en"),
+        ("[BOIL-80-A: Бойлер Tesy 80 л вертикален] е 189.00 EUR.", "bg"),
+        ("Инверторен климатик 12000 BTU A++, 2 kW, марка Tesy.", "bg"),
+        ("189.00 EUR", "bg"),  # no words either way: the shop default
+    ],
+)
+def test_answer_language_ignores_citations_units_and_brands(answer: str, language: str) -> None:
+    assert answer_language(answer) == language
+
+
+def test_an_english_case_answered_in_bulgarian_fails() -> None:
+    # Review: g026 (lang en) answered in Bulgarian used to pass.
+    c = case(lang="en", expected_tools=None, expected_facts=["59.00"])
+
+    score = score_case(c, "[HEAT-2K-C: Конвектор] струва 59.00 EUR и е наличен.", [], True)
+
+    assert score.facts_hit_rate == 1.0
+    assert not score.language_ok
+    assert not score.passed(c)
+
+
+async def test_the_table_flags_the_wrong_language() -> None:
+    llm = FakeLLM([LLMResponse(content="Здравейте, имаме бойлери.")])
+    results = await run_golden([case(lang="en", expected_tools=None)], services_for(llm))
+    report = EvalReport(date(2026, 11, 3), "m", "v", results)
+
+    assert "not in en" in render_table(report)
+    assert report.summary()["language_ok_rate"] == 0.0
+
+
+async def test_a_second_run_the_same_day_does_not_replace_the_first(tmp_path: Path) -> None:
+    report = await sample_report()
+
+    first = write_results(report, tmp_path)
+    second = write_results(report, tmp_path)
+    third = write_results(report, tmp_path)
+
+    assert [p.name for p in (first, second, third)] == [
+        "results-2026-11-03.json",
+        "results-2026-11-03-2.json",
+        "results-2026-11-03-3.json",
+    ]
