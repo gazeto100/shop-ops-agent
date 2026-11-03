@@ -105,3 +105,15 @@ model in `tests/integration/` (CI caches the model); unit tests use fakes.
   retrieval, a tool, or an earlier verified answer in the same session.
 - **/chat is `customer`-only** until operators are authenticated; the supplier tool is
   neither offered nor executable there.
+
+## 2026-11-03 — Eval runner and golden set (#8)
+- **Tool selection is scored as recall of the tools an answer requires** (extras listed,
+  not penalised). `[]` = no tool may be called; `null` = not scored, because the retrieved
+  catalog excerpt often makes `search_products` unnecessary and requiring it would punish
+  reasonable behaviour. Existing cases were adjusted to "required tools only".
+- **Facts and forbidden strings are case-insensitive substring checks**: deterministic and
+  cheap. Semantic faithfulness is the LLM-as-judge in #9.
+- **The eval runs the real `ChatService`, guardrails included**, so it scores what a user
+  would see, against a fresh index of the sample catalog the cases are written for.
+- **Results (`evals/results-<date>.json`) are gitignored run artifacts**; #9 can publish
+  them from CI. The eval fails only on errored cases; score thresholds are #9's gate.

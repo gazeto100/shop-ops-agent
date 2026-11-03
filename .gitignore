@@ -13,3 +13,4 @@ data/feeds/
 .DS_Store
 .coverage
 .coverage.*
+evals/
