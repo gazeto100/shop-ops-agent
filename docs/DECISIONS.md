@@ -49,6 +49,7 @@ model in `tests/integration/` (CI caches the model); unit tests use fakes.
   does not support the effort parameter"* (2026-10-27), although Anthropic's reference
   docs list effort for Haiku 5.5. The adapter never sends `output_config`; thinking depth
   is the model default. Revisit if we switch to an Opus/Sonnet model or the API changes.
+  *Superseded 2026-11-15: the 400 came from `claude-haiku-4-5`, not Haiku 5.5 (see below).*
 - **Ollama via its OpenAI-compatible endpoint** with the `openai` SDK: no new dependency,
   one message/tool mapping for two providers.
 - **Reply language is decided in code** and stated in the prompt, so it's deterministic
@@ -120,3 +121,20 @@ model in `tests/integration/` (CI caches the model); unit tests use fakes.
   would see, against a fresh index of the sample catalog the cases are written for.
 - **Results (`evals/results-<date>.json`) are gitignored run artifacts**; #9 can publish
   them from CI. The eval fails only on errored cases; score thresholds are #9's gate.
+
+## 2026-11-15 — Effort by model; correction to "No `effort` on Haiku" (#5)
+- **The #5 note blamed the wrong model.** The live run that returned 400 *"This model does
+  not support the effort parameter"* used `LLM_MODEL=claude-haiku-4-5` from `.env` (the #8
+  eval report shows the same model), not the code default `claude-haiku-5-5`.
+- **Which models take `output_config.effort`** (Anthropic models overview and migration
+  guide, checked 2026-11-15; the installed SDK 2.1.0 types the levels
+  `low`…`max` but doesn't say which models accept them): Haiku 5.5 (default `medium`),
+  Sonnet 4.6 / 5 / 5.5, Opus 4.5 (`low`–`high` only) / 4.6 / 4.7 / 4.8 / 5 / 5.5,
+  Fable / Mythos 5.x. **Haiku 4.5 and Sonnet 4.5 reject it.** Not re-verified live: no
+  paid call was made for this change.
+- **`AnthropicLLM` sends `effort: "low"` only to models on that allow-list** (family id or
+  a `<family>-…` snapshot). Short catalog answers don't need deep thinking, and low
+  means fewer tokens and less latency than Haiku 5.5's `medium` default. Unknown or
+  older models get no `output_config`, so a new model id never 400s on effort; add it to
+  `_EFFORT_MODELS` once its docs list effort. A `.env` still on `claude-haiku-4-5` keeps
+  working exactly as before.

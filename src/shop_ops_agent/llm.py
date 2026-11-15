@@ -147,9 +147,32 @@ def _anthropic_turns(messages: Sequence[Message]) -> list[AnthropicMessageParam]
     return turns
 
 
+# Model families documented to accept `output_config.effort` (Anthropic models overview
+# and migration guide, 2026-11). Others, e.g. claude-haiku-4-5 and claude-sonnet-4-5,
+# answer 400, so an unlisted model gets no effort: unknown means "don't send".
+_EFFORT_MODELS = (
+    "claude-haiku-5-5",
+    "claude-sonnet-4-6",
+    "claude-sonnet-5",  # also matches claude-sonnet-5-5
+    "claude-opus-4-5",  # low/medium/high only; we send low
+    "claude-opus-4-6",
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-opus-5",  # also matches claude-opus-5-5
+    "claude-fable-5",
+    "claude-mythos-5",
+)
+
+
+def _supports_effort(model: str) -> bool:
+    """True for a listed family id or one of its snapshots/versions (`<family>-...`)."""
+    return any(model == m or model.startswith(f"{m}-") for m in _EFFORT_MODELS)
+
+
 class AnthropicLLM:
-    # No `effort` and no temperature/top_p: the live API rejects `effort` for
-    # claude-haiku-5-5 (400, see DECISIONS.md) and current models reject sampling params.
+    # effort="low" on models that support it (see DECISIONS.md): short catalog answers
+    # don't need deep thinking, and low means fewer tokens and less latency. No
+    # temperature/top_p: current models reject sampling params.
     # Thinking counts toward max_tokens, so leave room beyond the visible answer.
     MAX_TOKENS = 8000
 
@@ -176,6 +199,9 @@ class AnthropicLLM:
                 system=system or anthropic.omit,
                 messages=_anthropic_turns(messages),
                 tools=tool_params or anthropic.omit,
+                output_config={"effort": "low"}
+                if _supports_effort(self._model)
+                else anthropic.omit,
             )
         # Most specific first; the SDK has already retried 429/5xx/connection errors.
         except anthropic.RateLimitError as e:
