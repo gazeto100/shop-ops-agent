@@ -399,3 +399,14 @@ async def test_result_records_the_prompt_version() -> None:
 
     assert result.prompt_version == PROMPT_VERSION
     assert PROMPT_VERSION == "2026-10-29.1"
+
+
+async def test_replaced_answers_are_kept_for_logs_and_evals_only() -> None:
+    price = await service(answering("Струва 1 EUR.")).answer(None, "Колко?")
+    product = await service(answering("Вижте [FAKE-9: Супер]."), hits=()).answer(None, "?")
+    fine = await service(answering("Здравейте!")).answer(None, "Здравей")
+
+    assert (price.replaced_answer, price.unbacked_figures) == ("Струва 1 EUR.", ("1 EUR",))
+    assert product.replaced_answer == "Вижте [FAKE-9: Супер]."
+    assert fine.replaced_answer is None
+    assert price.answer == PRICE_UNAVAILABLE_REPLY["bg"]  # the user still sees the safe reply

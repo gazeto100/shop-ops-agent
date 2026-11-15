@@ -81,8 +81,11 @@ class ChatResult:
     tool_calls: tuple[ToolCall, ...]
     session_id: str = ""  # filled in by ChatService.answer: pass it with the next message
     prompt_version: str = PROMPT_VERSION
-    # Set when the model's answer was replaced by a safe reply, and why.
+    # Set when the model's answer was replaced by a safe reply, and why. The replaced text
+    # is kept for logs and evals only; it is never returned to the user.
     guardrail: Guardrail | None = None
+    replaced_answer: str | None = None
+    unbacked_figures: tuple[str, ...] = ()
     unverified_skus: tuple[str, ...] = ()
 
 
@@ -222,6 +225,8 @@ class ChatService:
                 citations=(),
                 tool_calls=calls,
                 guardrail="price_or_stock",
+                replaced_answer=answer,
+                unbacked_figures=tuple(unbacked),
             )
         # Verified products: cited earlier in this session, retrieved now, or returned by a
         # tool now. Earlier citations make follow-ups ("and its warranty?") work.
@@ -238,6 +243,7 @@ class ChatService:
                 citations=(),
                 tool_calls=calls,
                 guardrail="unverified_product",
+                replaced_answer=answer,
                 unverified_skus=unverified,
             )
         return ChatResult(

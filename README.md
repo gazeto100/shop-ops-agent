@@ -66,8 +66,11 @@ curl localhost:8000/health                    # {"status":"ok","version":"0.1.0"
 ```bash
 RUN_LIVE_EVALS=1 make evals
 ```
-Golden set lives in `tests/evals/golden.jsonl`. Metrics: answer correctness,
-faithfulness (LLM-as-judge), tool-selection accuracy, citation precision.
+Runs the 33-case golden set (`tests/evals/golden.jsonl`) through the real agent, prints a
+score table and writes `evals/results-<date>.json`; skipped unless `RUN_LIVE_EVALS=1`.
+Per-case metrics: tool-selection recall, expected-facts hit rate, `must_not_contain`
+violations, citation present. The LLM-as-judge faithfulness score and the CI gate come in
+#9. Field reference and scoring rules: [`tests/evals/README.md`](tests/evals/README.md).
 
 ## Roadmap
 See `docs/ISSUES.md`.
