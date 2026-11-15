@@ -40,7 +40,8 @@ offered on `/chat`), and written in the user's language (Bulgarian unless the me
 English). The agent runs up to 5 model calls per message, then stops with a clear message.
 Prices and stock come only from `check_stock_and_price` in the same turn: an answer stating a
 figure no tool returned, or citing a product neither search nor a tool returned, is replaced
-by a safe reply. The response's `session_id` is issued by the server: send it back with the
+by a safe reply. Prices are given per product: the agent doesn't calculate totals or
+differences, since a computed figure isn't one a tool returned. The response's `session_id` is issued by the server: send it back with the
 next message for follow-ups (the last 10 messages are remembered, per process, lost on
 restart). An id the server didn't issue just starts a new session. A misconfigured service or an
 unavailable LLM provider returns `503` (with `Retry-After`). `LLM_MODEL` may be left empty to
