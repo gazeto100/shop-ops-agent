@@ -138,3 +138,17 @@ model in `tests/integration/` (CI caches the model); unit tests use fakes.
   older models get no `output_config`, so a new model id never 400s on effort; add it to
   `_EFFORT_MODELS` once its docs list effort. A `.env` still on `claude-haiku-4-5` keeps
   working exactly as before.
+
+## 2026-11-15 — Prices per product; supplier questions via the tool (prompt 2026-11-15.1)
+- **No price arithmetic, enforced in the prompt, not by loosening the guard.** Live evals
+  g022/g023/g025 failed because the model wrote differences or totals; those figures are
+  not in any tool result, so the price guard replaced the answer. Allowing computed
+  figures would mean the guard verifying arithmetic, and a wrong sum would be exactly the
+  invented price the guard exists to stop. The prompt now says: state each price as
+  returned, never compute a difference, total or percentage, list the prices instead and
+  say which product is cheaper.
+- **Per-audience system prompt.** Operators get an extra section: supplier, cost or
+  margin questions always call `compare_supplier_price` (g004 stopped calling it on
+  `claude-haiku-5-5`), with `threshold_pct` 0 when none is named, and its figures are
+  stated as returned. Customers' prompt doesn't name the internal tool at all. Each
+  audience's prompt is still a constant, so prefix caching is unaffected.

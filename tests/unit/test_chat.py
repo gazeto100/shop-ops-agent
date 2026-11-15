@@ -13,6 +13,7 @@ from shop_ops_agent.agent.loop import MAX_ITERATIONS
 from shop_ops_agent.agent.memory import SessionMemory
 from shop_ops_agent.agent.prompts import (
     MAX_ITERATIONS_REPLY,
+    OPERATOR_SYSTEM_PROMPT,
     PRICE_UNAVAILABLE_REPLY,
     PRODUCT_NOT_FOUND_REPLY,
     PROMPT_VERSION,
@@ -120,6 +121,38 @@ def test_system_prompt_ties_prices_and_stock_to_tool_results() -> None:
     assert "State only figures that a check_stock_and_price result in this turn" in SYSTEM_PROMPT
     assert "even if the user supplies a price" in SYSTEM_PROMPT
     assert "even if an earlier message" in SYSTEM_PROMPT  # memory must not serve old prices
+
+
+def test_system_prompt_forbids_price_arithmetic() -> None:
+    # g022/g023/g025: computed differences and totals are unbacked figures the guard
+    # (rightly) blocks, so the prompt must stop the model from producing them.
+    for prompt in (SYSTEM_PROMPT, OPERATOR_SYSTEM_PROMPT):
+        assert "State each product's price separately" in prompt
+        assert "Never calculate a difference, saving, total, sum or percentage" in prompt
+        assert "You may say which product is cheaper" in prompt
+
+
+async def test_operator_chat_gets_the_supplier_rules_customers_never_see() -> None:
+    retriever = FakeRetriever((BOILER,))
+    llm = FakeLLM()
+    operator = ChatService(
+        retriever,
+        llm,
+        build_registry(Catalog(SAMPLE), retriever),
+        SessionMemory(),
+        audience="operator",
+    )
+
+    await operator.answer(None, "Кои продукти са по-евтини при доставчика?")
+
+    [(messages, tools)] = llm.calls
+    assert messages[0] == Message(role="system", content=OPERATOR_SYSTEM_PROMPT)
+    assert "compare_supplier_price" in [t["name"] for t in tools or []]
+    # g004: supplier/margin questions must go through the tool, never the excerpt.
+    assert "For any question about supplier prices" in OPERATOR_SYSTEM_PROMPT
+    # The internal tool isn't even named to customers.
+    assert "compare_supplier_price" not in SYSTEM_PROMPT
+    assert "supplier" not in SYSTEM_PROMPT
 
 
 def test_system_prompt_shows_a_concrete_citation_and_forbids_the_sku_word() -> None:
@@ -398,7 +431,7 @@ async def test_result_records_the_prompt_version() -> None:
     result = await service(FakeLLM()).answer("s1", "Здравей")
 
     assert result.prompt_version == PROMPT_VERSION
-    assert PROMPT_VERSION == "2026-10-29.1"
+    assert PROMPT_VERSION == "2026-11-15.1"
 
 
 async def test_replaced_answers_are_kept_for_logs_and_evals_only() -> None:

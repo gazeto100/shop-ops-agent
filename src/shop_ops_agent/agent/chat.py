@@ -22,7 +22,7 @@ from shop_ops_agent.agent.prompts import (
     PRODUCT_NOT_FOUND_REPLY,
     PROMPT_VERSION,
     REFUSAL_REPLY,
-    SYSTEM_PROMPT,
+    SYSTEM_PROMPTS,
     Language,
     user_prompt,
 )
@@ -180,6 +180,7 @@ class ChatService:
         self._retriever = retriever
         self._memory = memory
         self._loop = AgentLoop(llm, registry, audience, max_iterations)
+        self._system_prompt = SYSTEM_PROMPTS[audience]
         self._k = k
 
     async def answer(self, session_id: str | None, question: str) -> ChatResult:
@@ -198,7 +199,7 @@ class ChatService:
         # search() embeds the query on the CPU; run it off the event loop.
         hits = await asyncio.to_thread(self._retriever.search, question, self._k)
         messages = [
-            Message(role="system", content=SYSTEM_PROMPT),
+            Message(role="system", content=self._system_prompt),
             *self._memory.history(session_id),
             Message(role="user", content=user_prompt(question, hits, language)),
         ]
