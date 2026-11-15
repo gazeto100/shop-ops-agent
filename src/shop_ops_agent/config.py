@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     langfuse_host: str = "https://cloud.langfuse.com"
 
     run_live_evals: bool = False
+    # Faithfulness judge for the live eval (#9): a different, stronger model than the
+    # agent's Haiku, so the agent isn't graded by its own blind spots. Same keys as above.
+    judge_provider: LLMProvider = "anthropic"
+    judge_model: str = "claude-sonnet-5-5"
 
     @property
     def resolved_llm_model(self) -> str:

@@ -9,12 +9,12 @@ import asyncio
 import json
 import logging
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Literal
 
-from shop_ops_agent.agent.loop import MAX_ITERATIONS, AgentLoop, ToolExchange
+from shop_ops_agent.agent.loop import MAX_ITERATIONS, AgentLoop, LoopResult, ToolExchange
 from shop_ops_agent.agent.memory import SessionMemory
 from shop_ops_agent.agent.prompts import (
     MAX_ITERATIONS_REPLY,
@@ -28,7 +28,7 @@ from shop_ops_agent.agent.prompts import (
 )
 from shop_ops_agent.agent.tools import Audience, ToolRegistry
 from shop_ops_agent.llm import LLM, LLMRefusalError, Message, ToolCall
-from shop_ops_agent.rag.retriever import Searcher
+from shop_ops_agent.rag.retriever import Hit, Searcher
 
 log = logging.getLogger(__name__)
 
@@ -87,6 +87,10 @@ class ChatResult:
     replaced_answer: str | None = None
     unbacked_figures: tuple[str, ...] = ()
     unverified_skus: tuple[str, ...] = ()
+    # What the model was given this turn: the retrieved excerpt and each tool result (as
+    # the model received it). For evals (the faithfulness judge) and logs, not the API.
+    retrieved: tuple[Hit, ...] = ()
+    tool_results: tuple[str, ...] = ()
 
 
 @dataclass
@@ -206,7 +210,20 @@ class ChatService:
         try:
             outcome = await self._loop.run(messages)
         except LLMRefusalError:
-            return ChatResult(answer=REFUSAL_REPLY[language], citations=(), tool_calls=())
+            return ChatResult(
+                answer=REFUSAL_REPLY[language], citations=(), tool_calls=(), retrieved=tuple(hits)
+            )
+        result = self._guarded(session_id, outcome, hits, language)
+        return replace(
+            result,
+            retrieved=tuple(hits),
+            tool_results=tuple(e.result_json for e in outcome.exchanges),
+        )
+
+    def _guarded(
+        self, session_id: str, outcome: LoopResult, hits: Sequence[Hit], language: Language
+    ) -> ChatResult:
+        """The model's final answer, or a safe reply when a guardrail rejects it."""
         calls = tuple(e.call for e in outcome.exchanges)
         if outcome.final is None:
             return ChatResult(

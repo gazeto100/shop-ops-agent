@@ -443,3 +443,15 @@ async def test_replaced_answers_are_kept_for_logs_and_evals_only() -> None:
     assert product.replaced_answer == "Вижте [FAKE-9: Супер]."
     assert fine.replaced_answer is None
     assert price.answer == PRICE_UNAVAILABLE_REPLY["bg"]  # the user still sees the safe reply
+
+
+async def test_result_records_what_the_model_was_given_for_the_judge() -> None:
+    llm = FakeLLM([LLMResponse(content="", tool_calls=(CHECK_BOILER,)), LLMResponse("Няма.")])
+
+    result = await service(llm).answer(None, "Колко струва бойлерът?")
+    refused = await service(RefusingLLM()).answer(None, "Колко струва бойлерът?")
+
+    assert result.retrieved == (BOILER, KETTLE)
+    [tool_result] = result.tool_results
+    assert tool_result == llm.calls[1][0][-1].content  # exactly what the model received
+    assert refused.retrieved == (BOILER, KETTLE) and refused.tool_results == ()

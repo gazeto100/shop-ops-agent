@@ -216,6 +216,7 @@ async def test_summary_aggregates_the_cases() -> None:
     assert summary == {
         "cases": 2,
         "passed": 1,
+        "pass_rate": 0.5,
         "errors": 0,
         "mean_tool_recall": 1.0,
         "mean_facts_hit_rate": 1.0,
@@ -224,6 +225,7 @@ async def test_summary_aggregates_the_cases() -> None:
         "must_not_contain_violations": 0,
         "citation_rate": 0.5,
         "language_ok_rate": 1.0,
+        "mean_faithfulness": None,  # no judge in this run
     }
 
 
@@ -233,7 +235,8 @@ async def test_table_lists_every_case_and_the_totals() -> None:
     assert "model test-model, prompt v1" in table
     assert "ok" in table and "PASS" in table
     assert "bad" in table and "FAIL" in table and "guardrail price_or_stock" in table
-    assert table.splitlines()[-1].startswith("passed 1/2, errors 0")
+    assert table.splitlines()[-2].startswith("passed 1/2, errors 0")
+    assert table.splitlines()[-1].startswith("gate: pass rate 0.5 < 0.9")
 
 
 def test_table_shows_errors_and_empty_summary() -> None:

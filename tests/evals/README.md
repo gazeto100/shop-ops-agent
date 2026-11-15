@@ -1,13 +1,13 @@
 # Evals
 
 ```bash
-RUN_LIVE_EVALS=1 make evals      # real LLM (from .env) + real embedding model + tools
+RUN_LIVE_EVALS=1 make evals      # real LLM + judge (from .env) + real embedding model + tools
 ```
 
 Without `RUN_LIVE_EVALS=1` the eval is **skipped**, not failed. A live run prints a score
 table and writes `evals/results-<YYYY-MM-DD>.json` (gitignored; later runs that day get
-`-2`, `-3`, … so before/after comparisons keep both). It fails only if a case *errors* (provider down, missing key); quality
-thresholds become the CI gate in #9. Each case runs in a fresh session against an index
+`-2`, `-3`, … so before/after comparisons keep both). It fails if a case *errors*
+(provider down, missing key) or the run misses the gate below. Each case runs in a fresh session against an index
 built from `data/products.sample.csv`, which the cases are written against.
 
 `golden.jsonl`: one case per line. Fields:
@@ -37,7 +37,18 @@ forbidden appears, a citation is present if required, and the answer is in the c
 guardrails run first, so a forbidden price the model wrote is usually replaced by the
 safe reply before scoring: the eval measures what the user would actually see.
 
-Issue #9 adds the LLM-as-judge faithfulness score and the CI gate
-(fail if mean score < 0.8 or any `must_not_contain` violated).
+**Faithfulness** (#9): a judge model (`JUDGE_PROVIDER` / `JUDGE_MODEL`, default
+`claude-sonnet-5-5`, deliberately not the agent's model) scores each answer 0–1: is every
+claim it makes supported by the catalog excerpt and tool results the agent had that turn?
+Declining or "can't confirm" counts as faithful. The score and the judge's reason are in
+the results file; the table shows the reason for scores below 0.80.
+
+**Gate** (the run, and the CI `evals` job, fails on any of these):
+- pass rate < 0.90
+- mean faithfulness < 0.80 (or not measured)
+- any `must_not_contain` violation
+
+The table's last line says `gate: PASS` or which threshold failed; in CI it is in the job
+summary.
 
 Add a case for every bug you fix.
