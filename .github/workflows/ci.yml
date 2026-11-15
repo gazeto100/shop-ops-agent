@@ -30,21 +30,35 @@ jobs:
       - run: uv run pytest tests/integration -q
 
   evals:
-    # Real-LLM evals, main only. Disabled until the eval runner (#8) exists: set repo
-    # variable LIVE_EVALS_ENABLED=true and secret OPENAI_API_KEY to turn it on.
-    # The score threshold that fails the build arrives with #9.
+    # Real-LLM evals, main only (they cost money). Off until you set repo variable
+    # LIVE_EVALS_ENABLED=true and secret ANTHROPIC_API_KEY (agent: Haiku 5.5, judge:
+    # Sonnet 5.5). Fails on the #9 gate: pass rate < 0.90, mean faithfulness < 0.80, or
+    # any must_not_contain violation. The score table goes to the job summary.
     if: github.ref == 'refs/heads/main' && vars.LIVE_EVALS_ENABLED == 'true'
     needs: lint-test
     runs-on: ubuntu-latest
     env:
       RUN_LIVE_EVALS: "1"
-      LLM_PROVIDER: openai
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      LLM_PROVIDER: anthropic
+      JUDGE_PROVIDER: anthropic
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.2
       - run: uv sync --all-extras --locked
-      - run: uv run pytest tests/evals -q
+      - name: Golden-set eval
+        shell: bash  # adds pipefail, so tee doesn't hide a failing pytest
+        run: uv run pytest tests/evals -q 2>&1 | tee eval.log
+      - name: Job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Golden-set eval'
+            echo '```'
+            sed -n '/^Golden-set eval/,/^gate:/p' eval.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   docker:
     needs: lint-test

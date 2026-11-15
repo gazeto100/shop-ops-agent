@@ -152,3 +152,23 @@ model in `tests/integration/` (CI caches the model); unit tests use fakes.
   `claude-haiku-5-5`), with `threshold_pct` 0 when none is named, and its figures are
   stated as returned. Customers' prompt doesn't name the internal tool at all. Each
   audience's prompt is still a constant, so prefix caching is unaffected.
+
+## 2026-11-15 — Faithfulness judge and the eval gate (#9)
+- **Judge model: `claude-sonnet-5-5`, not the agent's Haiku.** A model grading its own
+  output tends to share its blind spots (and to rate its own phrasing kindly); a
+  different, stronger model is a more independent check. Sonnet rather than Opus: the
+  task is narrow (are these claims in this context?) and runs once per case on every
+  main build. Configurable via `JUDGE_PROVIDER` / `JUDGE_MODEL`.
+- **The judge answers through a `submit_verdict` tool call** with a pydantic-validated
+  `{score 0–1, reason}`, so it works through the same provider layer as the agent, on any
+  provider. A missing or invalid verdict errors the case instead of guessing a score.
+- **It grades what the user saw** (guarded replies included) against what the agent was
+  given that turn: the retrieved excerpt and each tool result as the model received it.
+- **Gate:** pass rate ≥ 0.90, mean faithfulness ≥ 0.80, and no `must_not_contain`
+  violation; all three must hold, and an unmeasured value fails. The issue asked for
+  faithfulness ≥ 0.80; the pass-rate bar was added so the deterministic checks (tools,
+  facts, citations, language) gate too.
+- **CI `evals` runs the agent on Anthropic** (Haiku 5.5) with the Sonnet judge, so one
+  secret, `ANTHROPIC_API_KEY`, covers both; `OPENAI_API_KEY` is no longer used there. The
+  score table goes to the job summary (the job runs on `main` only, so there is no PR to
+  comment on).

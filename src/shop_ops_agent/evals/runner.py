@@ -1,7 +1,8 @@
 """Run the golden set through the chat service, score it, print and save a report.
 
-The runner takes ready-made `ChatService`s (one per audience), so unit tests drive it
-with FakeLLM and the live eval (tests/evals) with the real provider.
+The runner takes ready-made `ChatService`s (one per audience) and an optional `Judge`,
+so unit tests drive it with FakeLLM and the live eval (tests/evals) with real providers.
+`EvalReport.gate_failures` is the CI gate (#9).
 """
 
 import json
@@ -16,9 +17,14 @@ from typing import Any
 from shop_ops_agent.agent.chat import ChatService
 from shop_ops_agent.agent.tools import Audience
 from shop_ops_agent.evals.golden import GoldenCase
+from shop_ops_agent.evals.judge import Judge
 from shop_ops_agent.evals.metrics import CaseScore, score_case
 
 log = logging.getLogger(__name__)
+
+# The CI gate (#9): both thresholds must hold, and no forbidden string may appear.
+MIN_PASS_RATE = 0.90
+MIN_MEAN_FAITHFULNESS = 0.80
 
 
 @dataclass(frozen=True)
@@ -33,6 +39,9 @@ class CaseResult:
     replaced_answer: str | None = None
     unbacked_figures: tuple[str, ...] = ()
     score: CaseScore | None = None  # None when the case errored
+    # The judge's verdict on what the user saw; None when no judge ran.
+    faithfulness: float | None = None
+    judge_reason: str | None = None
     error: str | None = None
 
     @property
@@ -46,22 +55,40 @@ class EvalReport:
     model: str
     prompt_version: str
     results: tuple[CaseResult, ...]
+    judge_model: str | None = None
 
     def summary(self) -> dict[str, Any]:
         scores = [r.score for r in self.results if r.score is not None]
         recalls = [s.tool_recall for s in scores if s.tool_recall is not None]
         fact_rates = [s.facts_hit_rate for s in scores if s.facts_hit_rate is not None]
         must_cite = [r.score for r in self.results if r.case.must_cite and r.score is not None]
+        faithfulness = [r.faithfulness for r in self.results if r.faithfulness is not None]
+        passed = sum(r.passed for r in self.results)
         return {
             "cases": len(self.results),
-            "passed": sum(r.passed for r in self.results),
+            "passed": passed,
+            "pass_rate": round(passed / len(self.results), 3) if self.results else None,
             "errors": sum(r.error is not None for r in self.results),
             "mean_tool_recall": _mean(recalls),
             "mean_facts_hit_rate": _mean(fact_rates),
             "must_not_contain_violations": sum(len(s.violations) for s in scores),
             "citation_rate": _mean([float(s.citation_present) for s in must_cite]),
             "language_ok_rate": _mean([float(s.language_ok) for s in scores]),
+            "mean_faithfulness": _mean(faithfulness),
         }
+
+    def gate_failures(self) -> list[str]:
+        """Why this run fails the CI gate; empty when it passes. A missing measurement
+        fails too: a gate that can't measure must not pass silently."""
+        s = self.summary()
+        failures = []
+        if s["pass_rate"] is None or s["pass_rate"] < MIN_PASS_RATE:
+            failures.append(f"pass rate {s['pass_rate']} < {MIN_PASS_RATE}")
+        if s["mean_faithfulness"] is None or s["mean_faithfulness"] < MIN_MEAN_FAITHFULNESS:
+            failures.append(f"mean faithfulness {s['mean_faithfulness']} < {MIN_MEAN_FAITHFULNESS}")
+        if s["must_not_contain_violations"]:
+            failures.append(f"{s['must_not_contain_violations']} must_not_contain violation(s)")
+        return failures
 
 
 def _mean(values: Sequence[float]) -> float | None:
@@ -69,13 +96,21 @@ def _mean(values: Sequence[float]) -> float | None:
 
 
 async def run_golden(
-    cases: Sequence[GoldenCase], services: Mapping[Audience, ChatService]
+    cases: Sequence[GoldenCase],
+    services: Mapping[Audience, ChatService],
+    judge: Judge | None = None,
 ) -> tuple[CaseResult, ...]:
-    """Each case in a fresh session, one after another (gentle on rate limits)."""
+    """Each case in a fresh session, one after another (gentle on rate limits). The judge
+    grades the answer the user saw against what the agent was given that turn."""
     results = []
     for case in cases:
         try:
             chat = await services[case.audience].answer(None, case.question)
+            verdict = (
+                await judge.score(case.question, chat.retrieved, chat.tool_results, chat.answer)
+                if judge
+                else None
+            )
         except Exception as e:  # one failing case must not lose the whole run
             log.exception("eval case %s failed", case.id)
             results.append(CaseResult(case=case, error=f"{type(e).__name__}: {e}"))
@@ -91,6 +126,8 @@ async def run_golden(
                 replaced_answer=chat.replaced_answer,
                 unbacked_figures=chat.unbacked_figures,
                 score=score_case(case, chat.answer, tools, bool(chat.citations)),
+                faithfulness=verdict.score if verdict else None,
+                judge_reason=verdict.reason if verdict else None,
             )
         )
     return tuple(results)
@@ -103,10 +140,12 @@ def _pct(value: float | None) -> str:
 def render_table(report: EvalReport) -> str:
     header = (
         f"{'id':<6} {'category':<12} {'tools':>5} {'facts':>5} {'viol':>4} {'cite':>4} "
-        f"{'lang':>4}  result"
+        f"{'lang':>4} {'faith':>5}  result"
     )
+    judge = f", judge {report.judge_model}" if report.judge_model else ""
     lines = [
-        f"Golden-set eval {report.run_date} - model {report.model}, prompt {report.prompt_version}",
+        f"Golden-set eval {report.run_date} - model {report.model}, "
+        f"prompt {report.prompt_version}{judge}",
         header,
         "-" * len(header),
     ]
@@ -123,10 +162,13 @@ def render_table(report: EvalReport) -> str:
         notes += [f"guardrail {r.guardrail}"] if r.guardrail else []
         notes += [f"unbacked {list(r.unbacked_figures)}"] if r.unbacked_figures else []
         notes += [f"not in {r.case.lang}"] if not s.language_ok else []
+        low = r.faithfulness is not None and r.faithfulness < MIN_MEAN_FAITHFULNESS
+        notes += [f"judge: {r.judge_reason}"] if low else []
         lang = "ok" if s.language_ok else "no"
         lines.append(
             f"{r.case.id:<6} {r.case.category:<12} {_pct(s.tool_recall)} "
-            f"{_pct(s.facts_hit_rate)} {len(s.violations):>4} {cite:>4} {lang:>4}  "
+            f"{_pct(s.facts_hit_rate)} {len(s.violations):>4} {cite:>4} {lang:>4} "
+            f"{_pct(r.faithfulness)}  "
             f"{'PASS' if r.passed else 'FAIL'}  {'; '.join(notes)}".rstrip()
         )
     summary = report.summary()
@@ -137,7 +179,9 @@ def render_table(report: EvalReport) -> str:
         f"facts {_pct(summary['mean_facts_hit_rate']).strip()}, "
         f"violations {summary['must_not_contain_violations']}, "
         f"citations {_pct(summary['citation_rate']).strip()}, "
-        f"language {_pct(summary['language_ok_rate']).strip()}",
+        f"language {_pct(summary['language_ok_rate']).strip()}, "
+        f"faithfulness {_pct(summary['mean_faithfulness']).strip()}",
+        "gate: " + ("; ".join(failures) if (failures := report.gate_failures()) else "PASS"),
     ]
     return "\n".join(lines)
 
@@ -155,7 +199,9 @@ def write_results(report: EvalReport, out_dir: Path) -> Path:
         "date": report.run_date.isoformat(),
         "model": report.model,
         "prompt_version": report.prompt_version,
+        "judge_model": report.judge_model,
         "summary": report.summary(),
+        "gate_failures": report.gate_failures(),
         "cases": [
             {
                 **r.case.model_dump(),
@@ -163,6 +209,8 @@ def write_results(report: EvalReport, out_dir: Path) -> Path:
                 "tool_calls": list(r.tool_calls),
                 "citations": list(r.citations),
                 "guardrail": r.guardrail,
+                "faithfulness": r.faithfulness,
+                "judge_reason": r.judge_reason,
                 "replaced_answer": r.replaced_answer,
                 "unbacked_figures": list(r.unbacked_figures),
                 "passed": r.passed,

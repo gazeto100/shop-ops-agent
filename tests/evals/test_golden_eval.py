@@ -1,8 +1,9 @@
 """Live golden-set eval (#8): the real LLM provider, embedding model and tools.
 
 Skipped unless RUN_LIVE_EVALS=1. Prints the score table and writes
-evals/results-<date>.json. It fails only when a case errors (provider down, bad key);
-quality thresholds become a CI gate in #9.
+evals/results-<date>.json. Fails when a case errors (provider down, bad key) or the run
+misses the gate (#9): pass rate < 0.90, mean judge faithfulness < 0.80, or any
+must_not_contain violation.
 """
 
 from datetime import date
@@ -17,6 +18,7 @@ from shop_ops_agent.agent.tools import Audience, Catalog, build_registry
 from shop_ops_agent.config import get_settings
 from shop_ops_agent.embeddings import SentenceTransformerEmbedder
 from shop_ops_agent.evals.golden import load_golden
+from shop_ops_agent.evals.judge import Judge, create_judge
 from shop_ops_agent.evals.runner import EvalReport, render_table, run_golden, write_results
 from shop_ops_agent.ingest.index import open_collection, sync_products
 from shop_ops_agent.ingest.products import load_products
@@ -31,6 +33,11 @@ RESULTS_DIR = ROOT / "evals"
 pytestmark = pytest.mark.skipif(
     not get_settings().run_live_evals, reason="live evals call a real LLM: set RUN_LIVE_EVALS=1"
 )
+
+
+@pytest.fixture(scope="module")
+def judge() -> Judge:
+    return create_judge(get_settings())  # fails clearly if the judge's key is missing
 
 
 @pytest.fixture(scope="module")
@@ -51,14 +58,15 @@ def services(tmp_path_factory: pytest.TempPathFactory) -> dict[Audience, ChatSer
 
 
 async def test_golden_set(
-    services: dict[Audience, ChatService], capsys: pytest.CaptureFixture[str]
+    services: dict[Audience, ChatService], judge: Judge, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    results = await run_golden(load_golden(GOLDEN), services)
+    results = await run_golden(load_golden(GOLDEN), services, judge)
     report = EvalReport(
         run_date=date.today(),
         model=get_settings().resolved_llm_model,
         prompt_version=PROMPT_VERSION,
         results=results,
+        judge_model=judge.model,
     )
     path = write_results(report, RESULTS_DIR)
 
@@ -67,3 +75,5 @@ async def test_golden_set(
 
     errors = [f"{r.case.id}: {r.error}" for r in results if r.error]
     assert not errors, "cases errored (infrastructure, not quality):\n" + "\n".join(errors)
+    failures = report.gate_failures()
+    assert not failures, "eval gate failed: " + "; ".join(failures)
