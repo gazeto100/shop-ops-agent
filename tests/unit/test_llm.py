@@ -49,7 +49,9 @@ class _Recorder:
         return self.response
 
 
-def anthropic_stub(**message: Any) -> tuple[AnthropicLLM, _Recorder]:
+def anthropic_stub(
+    model: str = "claude-haiku-5-5", **message: Any
+) -> tuple[AnthropicLLM, _Recorder]:
     response = AnthropicMessage.model_validate(
         {
             "id": "msg_1",
@@ -65,7 +67,7 @@ def anthropic_stub(**message: Any) -> tuple[AnthropicLLM, _Recorder]:
     )
     recorder = _Recorder(response)
     client = type("StubAnthropic", (), {"messages": recorder})()
-    return AnthropicLLM("claude-haiku-5-5", cast(anthropic.AsyncAnthropic, client)), recorder
+    return AnthropicLLM(model, cast(anthropic.AsyncAnthropic, client)), recorder
 
 
 def openai_stub(**message: Any) -> tuple[OpenAILLM, _Recorder]:
@@ -111,9 +113,35 @@ async def test_anthropic_request_shape() -> None:
             "input_schema": TOOLS[0]["parameters"],
         }
     ]
-    # Never sent: effort 400s on claude-haiku-5-5 (live API); sampling params 400 on
-    # current Claude models.
-    assert not {"output_config", "temperature", "top_p", "top_k"} & sent.kwargs.keys()
+    assert sent.kwargs["output_config"] == {"effort": "low"}
+    # Never sent: sampling params 400 on current Claude models.
+    assert not {"temperature", "top_p", "top_k"} & sent.kwargs.keys()
+
+
+@pytest.mark.parametrize(
+    ("model", "sends_effort"),
+    [
+        ("claude-haiku-5-5", True),
+        ("claude-sonnet-5-5", True),
+        ("claude-opus-5-5", True),
+        ("claude-opus-4-5-20251101", True),  # dated snapshot of a supported family
+        ("claude-fable-5-2", True),
+        ("claude-haiku-4-5", False),  # 400 "does not support the effort parameter"
+        ("claude-haiku-4-5-20251001", False),
+        ("claude-sonnet-4-5", False),
+        ("claude-haiku-5-50", False),  # prefix of a supported id is not enough
+        ("some-future-model", False),  # unknown: don't risk a 400
+    ],
+)
+async def test_anthropic_sends_effort_only_to_models_that_support_it(
+    model: str, sends_effort: bool
+) -> None:
+    llm, sent = anthropic_stub(model)
+
+    await llm.complete(CONVERSATION)
+
+    expected = {"effort": "low"} if sends_effort else anthropic.omit
+    assert sent.kwargs["output_config"] == expected
 
 
 async def test_anthropic_omits_tools_and_system_when_absent() -> None:
@@ -343,6 +371,7 @@ async def test_anthropic_sdk_sends_the_thinking_signature_back() -> None:
     )
 
     assert final.content == "189.00 EUR"
+    assert bodies[0]["output_config"] == {"effort": "low"}  # the wire shape
     replayed = bodies[1]["messages"][1]["content"]
     assert replayed[0] == {"type": "thinking", "thinking": "", "signature": "SIG-42"}
     assert replayed[1]["type"] == "tool_use"
