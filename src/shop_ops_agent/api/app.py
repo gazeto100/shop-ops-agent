@@ -24,6 +24,7 @@ from shop_ops_agent.embeddings import SentenceTransformerEmbedder
 from shop_ops_agent.ingest.index import IndexModelMismatchError, open_collection
 from shop_ops_agent.llm import LLMConfigError, LLMUnavailableError, create_llm
 from shop_ops_agent.rag.retriever import Retriever
+from shop_ops_agent.tracing import TracedLLM, create_tracer
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +50,11 @@ def get_chat_service() -> ChatService:
     registry = build_registry(Catalog(Path(settings.catalog_path)), retriever)
     # /chat has no authentication yet, so every caller is a customer: operator-only tools
     # (supplier prices) are never offered or executed here.
-    return ChatService(retriever, llm, registry, SessionMemory(), audience="customer")
+    tracer = create_tracer(settings)  # a no-op without LANGFUSE_* keys
+    traced_llm = TracedLLM(llm, settings.resolved_llm_model, tracer)
+    return ChatService(
+        retriever, traced_llm, registry, SessionMemory(), audience="customer", tracer=tracer
+    )
 
 
 # Clients get a generic message; the real cause (which may name env vars or paths) is

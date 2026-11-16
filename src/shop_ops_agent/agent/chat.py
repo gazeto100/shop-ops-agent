@@ -29,6 +29,7 @@ from shop_ops_agent.agent.prompts import (
 from shop_ops_agent.agent.tools import Audience, ToolRegistry
 from shop_ops_agent.llm import LLM, LLMRefusalError, Message, ToolCall
 from shop_ops_agent.rag.retriever import Searcher
+from shop_ops_agent.tracing import NO_TRACER, Tracer
 
 log = logging.getLogger(__name__)
 
@@ -176,18 +177,26 @@ class ChatService:
         audience: Audience = "customer",
         k: int = 5,
         max_iterations: int = MAX_ITERATIONS,
+        tracer: Tracer = NO_TRACER,
     ) -> None:
         self._retriever = retriever
         self._memory = memory
-        self._loop = AgentLoop(llm, registry, audience, max_iterations)
+        self._loop = AgentLoop(llm, registry, audience, max_iterations, tracer)
         self._system_prompt = SYSTEM_PROMPTS[audience]
+        self._audience = audience
         self._k = k
+        self._tracer = tracer
 
     async def answer(self, session_id: str | None, question: str) -> ChatResult:
         """`session_id` is the id a previous answer returned, or None to start a session.
         An id this service didn't issue starts a new session too."""
         session_id = self._memory.resolve(session_id)
-        result = await self._answer(session_id, question)
+        metadata = {"audience": self._audience, "prompt_version": PROMPT_VERSION}
+        with self._tracer.trace(
+            "chat", session_id=session_id, input=question, metadata=metadata
+        ) as trace:
+            result = await self._answer(session_id, question)
+            trace.update(output=result.answer, metadata={"guardrail": result.guardrail})
         # Remember what the user actually saw, guarded replies included, and which
         # products it verifiably cited.
         cited = {c.sku: c.name for c in result.citations}
@@ -197,7 +206,9 @@ class ChatService:
     async def _answer(self, session_id: str, question: str) -> ChatResult:
         language = detect_language(question)
         # search() embeds the query on the CPU; run it off the event loop.
-        hits = await asyncio.to_thread(self._retriever.search, question, self._k)
+        with self._tracer.span("retrieval", "retriever", input=question) as span:
+            hits = await asyncio.to_thread(self._retriever.search, question, self._k)
+            span.update(output=[{"sku": h.sku, "score": h.score} for h in hits])
         messages = [
             Message(role="system", content=self._system_prompt),
             *self._memory.history(session_id),

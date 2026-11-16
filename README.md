@@ -63,6 +63,21 @@ docker run --rm -p 8000:8000 shop-ops-agent
 curl localhost:8000/health                    # {"status":"ok","version":"0.1.0"}
 ```
 
+## Tracing
+Set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` (and `LANGFUSE_HOST` for a non-EU or
+self-hosted Langfuse) and every `/chat` request becomes one Langfuse trace:
+
+```
+chat (agent)                question -> answer, prompt version, guardrail
+├── retrieval (retriever)   question -> retrieved SKUs and scores
+├── llm (generation)        messages -> reply, model, input/output tokens
+├── check_stock_and_price   arguments -> tool result
+└── llm (generation)        ...
+```
+
+Turns of one conversation share the response's `session_id`, so Langfuse groups them as a
+session. Without the keys tracing is off: nothing is sent and no Langfuse client is created.
+
 ## Evals
 ```bash
 RUN_LIVE_EVALS=1 make evals

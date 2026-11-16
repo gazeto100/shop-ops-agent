@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from shop_ops_agent.agent.tools import Audience, ToolRegistry
 from shop_ops_agent.llm import LLM, LLMResponse, Message, ToolCall
+from shop_ops_agent.tracing import NO_TRACER, Tracer
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class AgentLoop:
         registry: ToolRegistry,
         audience: Audience,
         max_iterations: int = MAX_ITERATIONS,
+        tracer: Tracer = NO_TRACER,
     ) -> None:
         if max_iterations < 1:
             raise ValueError("max_iterations must be at least 1")
@@ -48,6 +50,7 @@ class AgentLoop:
         self._registry = registry
         self._audience = audience
         self._max_iterations = max_iterations
+        self._tracer = tracer
 
     async def run(self, messages: list[Message]) -> LoopResult:
         conversation = list(messages)  # this turn's working copy; only ever appended to
@@ -76,7 +79,9 @@ class AgentLoop:
     async def _execute(self, call: ToolCall) -> ToolExchange:
         # Tools are synchronous (CSV / embedding work); keep them off the event loop.
         # registry.call never raises: failures come back as a ToolError result.
-        result = await asyncio.to_thread(
-            self._registry.call, call.name, call.arguments, self._audience
-        )
+        with self._tracer.span(call.name, "tool", input=call.arguments) as span:
+            result = await asyncio.to_thread(
+                self._registry.call, call.name, call.arguments, self._audience
+            )
+            span.update(output=result.model_dump(mode="json"))
         return ToolExchange(call=call, result=result, result_json=result.model_dump_json())

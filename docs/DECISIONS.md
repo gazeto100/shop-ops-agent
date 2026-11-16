@@ -152,3 +152,24 @@ model in `tests/integration/` (CI caches the model); unit tests use fakes.
   `claude-haiku-5-5`), with `threshold_pct` 0 when none is named, and its figures are
   stated as returned. Customers' prompt doesn't name the internal tool at all. Each
   audience's prompt is still a constant, so prefix caching is unaffected.
+
+## 2026-11-16 — Langfuse tracing (#10)
+- **Our own thin `Tracer` over Langfuse's context managers, not `@observe`.** The decorator
+  records every argument of the function it wraps (Claude's thinking blocks included) and
+  relies on a global client. `Tracer` is passed in like the LLM and the retriever, records
+  only what we choose, and is `NO_TRACER` without both `LANGFUSE_*` keys: no Langfuse
+  client is created, nothing is sent, and tests need no keys.
+- **LLM calls are traced by a wrapper, `TracedLLM`, around any adapter.** One place covers
+  OpenAI, Anthropic and Ollama. Usage from `LLMResponse.usage` becomes Langfuse's
+  `input`/`output` usage, so Langfuse prices the generation from the model name.
+- **What a trace holds:** the question and the answer the user saw (guarded replies too),
+  prompt version, audience and guardrail on the root; retrieved SKUs and scores; each tool
+  call's arguments and result; each LLM call's messages (system prompt and catalog
+  excerpt included, provider thinking blocks left out), reply and tokens. Customer
+  messages therefore reach Langfuse when the keys are set; that's the operator's call.
+- **Spans nest through OpenTelemetry context**, which `asyncio.to_thread` copies, so tool
+  spans run in worker threads still land under the turn. Traces share the session id so
+  Langfuse groups a conversation. Export is batched in the background; Langfuse flushes
+  the rest at interpreter exit.
+- **No new dependency:** `langfuse` was already declared. The tests use the OpenTelemetry
+  SDK it installs, exporting to an in-memory exporter instead of the network.
